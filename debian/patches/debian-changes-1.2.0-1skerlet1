@@ -1,0 +1,1160 @@
+Description: Upstream changes introduced in version 1.2.0-1skerlet1
+ This patch has been created by dpkg-source during the package build.
+ Here's the last changelog entry, hopefully it gives details on why
+ those changes were made:
+ .
+ trace-cmd (1.2.0-1skerlet1) ashitaka; urgency=low
+ .
+   * Initial release.
+ .
+ The person named in the Author field signed this changelog entry.
+Author: Skerlet Project Team <skerlet@swc.toshiba.co.jp>
+
+---
+The information above should follow the Patch Tagging Guidelines, please
+checkout http://dep.debian.net/deps/dep3/ to learn about the format. Here
+are templates for supplementary fields that you might want to add:
+
+Origin: <vendor|upstream|other>, <url of original patch>
+Bug: <url in upstream bugtracker>
+Bug-Debian: http://bugs.debian.org/<bugnumber>
+Bug-Ubuntu: https://launchpad.net/bugs/<bugnumber>
+Forwarded: <no|not-needed|url proving that it has been forwarded>
+Reviewed-By: <name and email of someone who approved the patch>
+Last-Update: <YYYY-MM-DD>
+
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/control
+@@ -0,0 +1,20 @@
++Source: trace-cmd
++Section: unknown
++Priority: extra
++Maintainer: KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>
++Build-Depends: debhelper (>= 7.0.50~)
++Standards-Version: 3.8.4
++Homepage: <insert the upstream URL, if relevant>
++#Vcs-Git: git://git.debian.org/collab-maint/trace-cmd.git
++#Vcs-Browser: http://git.debian.org/?p=collab-maint/trace-cmd.git;a=summary
++
++Package: trace-cmd
++Architecture: any
++Depends: ${shlibs:Depends}, ${misc:Depends}
++Description: <insert up to 60 chars description>
++ <insert long description, indented with spaces>
++
++Package: trace-cmd-doc
++Architecture: all
++Description: documentation for trace-cmd
++ <insert long description, indented with spaces>
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/copyright
+@@ -0,0 +1,37 @@
++This work was packaged for Debian by:
++
++    KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp> on Fri, 20 Apr 2012 18:13:58 +0900
++
++It was downloaded from:
++
++    <url://example.com>
++
++Upstream Author(s):
++
++    <put author's name and email here>
++    <likewise for another author>
++
++Copyright:
++
++    <Copyright (C) YYYY Firstname Lastname>
++    <likewise for another author>
++
++License:
++
++    <Put the license of the package here indented by 4 spaces>
++
++The Debian packaging is:
++
++    Copyright (C) 2012 KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>
++
++# Please chose a license for your packaging work. If the program you package
++# uses a mainstream license, using the same license is the safest choice.
++# Please avoid to pick license terms that are more restrictive than the
++# packaged work, as it may make Debian's contributions unacceptable upstream.
++# If you just want it to be GPL version 3, leave the following lines in.
++
++and is licensed under the GPL version 3,
++see "/usr/share/common-licenses/GPL-3".
++
++# Please also look if there are files or directories which have a
++# different copyright/license attached and list them here.
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/README.Debian
+@@ -0,0 +1,6 @@
++trace-cmd for Debian
++--------------------
++
++<possible notes regarding this package - if none, delete this file>
++
++ -- KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>  Fri, 20 Apr 2012 18:13:58 +0900
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/emacsen-startup.ex
+@@ -0,0 +1,25 @@
++;; -*-emacs-lisp-*-
++;;
++;; Emacs startup file, e.g.  /etc/emacs/site-start.d/50trace-cmd.el
++;; for the Debian trace-cmd package
++;;
++;; Originally contributed by Nils Naumann <naumann@unileoben.ac.at>
++;; Modified by Dirk Eddelbuettel <edd@debian.org>
++;; Adapted for dh-make by Jim Van Zandt <jrv@debian.org>
++
++;; The trace-cmd package follows the Debian/GNU Linux 'emacsen' policy and
++;; byte-compiles its elisp files for each 'emacs flavor' (emacs19,
++;; xemacs19, emacs20, xemacs20...).  The compiled code is then
++;; installed in a subdirectory of the respective site-lisp directory.
++;; We have to add this to the load-path:
++(let ((package-dir (concat "/usr/share/"
++                           (symbol-name flavor)
++                           "/site-lisp/trace-cmd")))
++;; If package-dir does not exist, the trace-cmd package must have
++;; removed but not purged, and we should skip the setup.
++  (when (file-directory-p package-dir)
++    (setq load-path (cons package-dir load-path))
++    (autoload 'trace-cmd-mode "trace-cmd-mode"
++      "Major mode for editing trace-cmd files." t)
++    (add-to-list 'auto-mode-alist '("\\.trace-cmd$" . trace-cmd-mode))))
++
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/trace-cmd.default.ex
+@@ -0,0 +1,10 @@
++# Defaults for trace-cmd initscript
++# sourced by /etc/init.d/trace-cmd
++# installed at /etc/default/trace-cmd by the maintainer scripts
++
++#
++# This is a POSIX shell fragment
++#
++
++# Additional options that are passed to the Daemon.
++DAEMON_OPTS=""
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/menu.ex
+@@ -0,0 +1,2 @@
++?package(trace-cmd):needs="X11|text|vc|wm" section="Applications/see-menu-manual"\
++  title="trace-cmd" command="/usr/bin/trace-cmd"
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/postrm.ex
+@@ -0,0 +1,37 @@
++#!/bin/sh
++# postrm script for trace-cmd
++#
++# see: dh_installdeb(1)
++
++set -e
++
++# summary of how this script can be called:
++#        * <postrm> `remove'
++#        * <postrm> `purge'
++#        * <old-postrm> `upgrade' <new-version>
++#        * <new-postrm> `failed-upgrade' <old-version>
++#        * <new-postrm> `abort-install'
++#        * <new-postrm> `abort-install' <old-version>
++#        * <new-postrm> `abort-upgrade' <old-version>
++#        * <disappearer's-postrm> `disappear' <overwriter>
++#          <overwriter-version>
++# for details, see http://www.debian.org/doc/debian-policy/ or
++# the debian-policy package
++
++
++case "$1" in
++    purge|remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
++    ;;
++
++    *)
++        echo "postrm called with unknown argument \`$1'" >&2
++        exit 1
++    ;;
++esac
++
++# dh_installdeb will replace this with shell code automatically
++# generated by other debhelper scripts.
++
++#DEBHELPER#
++
++exit 0
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/trace-cmd-doc.docs
+@@ -0,0 +1 @@
++#DOCS#
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/init.d.ex
+@@ -0,0 +1,154 @@
++#!/bin/sh
++### BEGIN INIT INFO
++# Provides:          trace-cmd
++# Required-Start:    $network $local_fs
++# Required-Stop:
++# Default-Start:     2 3 4 5
++# Default-Stop:      0 1 6
++# Short-Description: <Enter a short description of the sortware>
++# Description:       <Enter a long description of the software>
++#                    <...>
++#                    <...>
++### END INIT INFO
++
++# Author: KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>
++
++# PATH should only include /usr/* if it runs after the mountnfs.sh script
++PATH=/sbin:/usr/sbin:/bin:/usr/bin
++DESC=trace-cmd             # Introduce a short description here
++NAME=trace-cmd             # Introduce the short server's name here
++DAEMON=/usr/sbin/trace-cmd # Introduce the server's location here
++DAEMON_ARGS=""             # Arguments to run the daemon with
++PIDFILE=/var/run/$NAME.pid
++SCRIPTNAME=/etc/init.d/$NAME
++
++# Exit if the package is not installed
++[ -x $DAEMON ] || exit 0
++
++# Read configuration variable file if it is present
++[ -r /etc/default/$NAME ] && . /etc/default/$NAME
++
++# Load the VERBOSE setting and other rcS variables
++. /lib/init/vars.sh
++
++# Define LSB log_* functions.
++# Depend on lsb-base (>= 3.0-6) to ensure that this file is present.
++. /lib/lsb/init-functions
++
++#
++# Function that starts the daemon/service
++#
++do_start()
++{
++	# Return
++	#   0 if daemon has been started
++	#   1 if daemon was already running
++	#   2 if daemon could not be started
++	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null \
++		|| return 1
++	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- \
++		$DAEMON_ARGS \
++		|| return 2
++	# Add code here, if necessary, that waits for the process to be ready
++	# to handle requests from services started subsequently which depend
++	# on this one.  As a last resort, sleep for some time.
++}
++
++#
++# Function that stops the daemon/service
++#
++do_stop()
++{
++	# Return
++	#   0 if daemon has been stopped
++	#   1 if daemon was already stopped
++	#   2 if daemon could not be stopped
++	#   other if a failure occurred
++	start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE --name $NAME
++	RETVAL="$?"
++	[ "$RETVAL" = 2 ] && return 2
++	# Wait for children to finish too if this is a daemon that forks
++	# and if the daemon is only ever run from this initscript.
++	# If the above conditions are not satisfied then add some other code
++	# that waits for the process to drop all resources that could be
++	# needed by services started subsequently.  A last resort is to
++	# sleep for some time.
++	start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec $DAEMON
++	[ "$?" = 2 ] && return 2
++	# Many daemons don't delete their pidfiles when they exit.
++	rm -f $PIDFILE
++	return "$RETVAL"
++}
++
++#
++# Function that sends a SIGHUP to the daemon/service
++#
++do_reload() {
++	#
++	# If the daemon can reload its configuration without
++	# restarting (for example, when it is sent a SIGHUP),
++	# then implement that here.
++	#
++	start-stop-daemon --stop --signal 1 --quiet --pidfile $PIDFILE --name $NAME
++	return 0
++}
++
++case "$1" in
++  start)
++    [ "$VERBOSE" != no ] && log_daemon_msg "Starting $DESC " "$NAME"
++    do_start
++    case "$?" in
++		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
++		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
++	esac
++  ;;
++  stop)
++	[ "$VERBOSE" != no ] && log_daemon_msg "Stopping $DESC" "$NAME"
++	do_stop
++	case "$?" in
++		0|1) [ "$VERBOSE" != no ] && log_end_msg 0 ;;
++		2) [ "$VERBOSE" != no ] && log_end_msg 1 ;;
++	esac
++	;;
++  status)
++       status_of_proc "$DAEMON" "$NAME" && exit 0 || exit $?
++       ;;
++  #reload|force-reload)
++	#
++	# If do_reload() is not implemented then leave this commented out
++	# and leave 'force-reload' as an alias for 'restart'.
++	#
++	#log_daemon_msg "Reloading $DESC" "$NAME"
++	#do_reload
++	#log_end_msg $?
++	#;;
++  restart|force-reload)
++	#
++	# If the "reload" option is implemented then remove the
++	# 'force-reload' alias
++	#
++	log_daemon_msg "Restarting $DESC" "$NAME"
++	do_stop
++	case "$?" in
++	  0|1)
++		do_start
++		case "$?" in
++			0) log_end_msg 0 ;;
++			1) log_end_msg 1 ;; # Old process is still running
++			*) log_end_msg 1 ;; # Failed to start
++		esac
++		;;
++	  *)
++	  	# Failed to stop
++		log_end_msg 1
++		;;
++	esac
++	;;
++  *)
++	#echo "Usage: $SCRIPTNAME {start|stop|restart|reload|force-reload}" >&2
++	echo "Usage: $SCRIPTNAME {start|stop|status|restart|force-reload}" >&2
++	exit 3
++	;;
++esac
++
++:
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/preinst.ex
+@@ -0,0 +1,35 @@
++#!/bin/sh
++# preinst script for trace-cmd
++#
++# see: dh_installdeb(1)
++
++set -e
++
++# summary of how this script can be called:
++#        * <new-preinst> `install'
++#        * <new-preinst> `install' <old-version>
++#        * <new-preinst> `upgrade' <old-version>
++#        * <old-preinst> `abort-upgrade' <new-version>
++# for details, see http://www.debian.org/doc/debian-policy/ or
++# the debian-policy package
++
++
++case "$1" in
++    install|upgrade)
++    ;;
++
++    abort-upgrade)
++    ;;
++
++    *)
++        echo "preinst called with unknown argument \`$1'" >&2
++        exit 1
++    ;;
++esac
++
++# dh_installdeb will replace this with shell code automatically
++# generated by other debhelper scripts.
++
++#DEBHELPER#
++
++exit 0
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/compat
+@@ -0,0 +1 @@
++7
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/trace-cmd.cron.d.ex
+@@ -0,0 +1,4 @@
++#
++# Regular cron jobs for the trace-cmd package
++#
++0 4	* * *	root	[ -x /usr/bin/trace-cmd_maintenance ] && /usr/bin/trace-cmd_maintenance
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/rules
+@@ -0,0 +1,21 @@
++#!/usr/bin/make -f
++# -*- makefile -*-
++# Sample debian/rules that uses debhelper.
++#
++# This file was originally written by Joey Hess and Craig Small.
++# As a special exception, when this file is copied by dh-make into a
++# dh-make output file, you may use that output file without restriction.
++# This special exception was added by Craig Small in version 0.37 of dh-make.
++#
++# Modified to make a template file for a multi-binary package with separated
++# build-arch and build-indep targets  by Bill Allombert 2001
++
++# Uncomment this to turn on verbose mode.
++#export DH_VERBOSE=1
++
++# This has to be exported to make some magic below work.
++export DH_OPTIONS
++
++
++%:
++	dh $@ 
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/postinst.ex
+@@ -0,0 +1,39 @@
++#!/bin/sh
++# postinst script for trace-cmd
++#
++# see: dh_installdeb(1)
++
++set -e
++
++# summary of how this script can be called:
++#        * <postinst> `configure' <most-recently-configured-version>
++#        * <old-postinst> `abort-upgrade' <new version>
++#        * <conflictor's-postinst> `abort-remove' `in-favour' <package>
++#          <new-version>
++#        * <postinst> `abort-remove'
++#        * <deconfigured's-postinst> `abort-deconfigure' `in-favour'
++#          <failed-install-package> <version> `removing'
++#          <conflicting-package> <version>
++# for details, see http://www.debian.org/doc/debian-policy/ or
++# the debian-policy package
++
++
++case "$1" in
++    configure)
++    ;;
++
++    abort-upgrade|abort-remove|abort-deconfigure)
++    ;;
++
++    *)
++        echo "postinst called with unknown argument \`$1'" >&2
++        exit 1
++    ;;
++esac
++
++# dh_installdeb will replace this with shell code automatically
++# generated by other debhelper scripts.
++
++#DEBHELPER#
++
++exit 0
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/manpage.xml.ex
+@@ -0,0 +1,291 @@
++<?xml version='1.0' encoding='UTF-8'?>
++<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
++"http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd" [
++
++<!--
++
++`xsltproc -''-nonet \
++          -''-param man.charmap.use.subset "0" \
++          -''-param make.year.ranges "1" \
++          -''-param make.single.year.ranges "1" \
++          /usr/share/xml/docbook/stylesheet/docbook-xsl/manpages/docbook.xsl \
++          manpage.xml'
++
++A manual page <package>.<section> will be generated. You may view the
++manual page with: nroff -man <package>.<section> | less'. A typical entry
++in a Makefile or Makefile.am is:
++
++DB2MAN = /usr/share/sgml/docbook/stylesheet/xsl/docbook-xsl/manpages/docbook.xsl
++XP     = xsltproc -''-nonet -''-param man.charmap.use.subset "0"
++
++manpage.1: manpage.xml
++        $(XP) $(DB2MAN) $<
++
++The xsltproc binary is found in the xsltproc package. The XSL files are in
++docbook-xsl. A description of the parameters you can use can be found in the
++docbook-xsl-doc-* packages. Please remember that if you create the nroff
++version in one of the debian/rules file targets (such as build), you will need
++to include xsltproc and docbook-xsl in your Build-Depends control field.
++Alternatively use the xmlto command/package. That will also automatically
++pull in xsltproc and docbook-xsl.
++
++Notes for using docbook2x: docbook2x-man does not automatically create the
++AUTHOR(S) and COPYRIGHT sections. In this case, please add them manually as
++<refsect1> ... </refsect1>.
++
++To disable the automatic creation of the AUTHOR(S) and COPYRIGHT sections
++read /usr/share/doc/docbook-xsl/doc/manpages/authors.html. This file can be
++found in the docbook-xsl-doc-html package.
++
++Validation can be done using: `xmllint -''-noout -''-valid manpage.xml`
++
++General documentation about man-pages and man-page-formatting:
++man(1), man(7), http://www.tldp.org/HOWTO/Man-Page/
++
++-->
++
++  <!-- Fill in your name for FIRSTNAME and SURNAME. -->
++  <!ENTITY dhfirstname "FIRSTNAME">
++  <!ENTITY dhsurname   "SURNAME">
++  <!-- dhusername could also be set to "&dhfirstname; &dhsurname;". -->
++  <!ENTITY dhusername  "KOBAYASHI Yoshitake">
++  <!ENTITY dhemail     "yoshitake.kobayashi@toshiba.co.jp">
++  <!-- SECTION should be 1-8, maybe w/ subsection other parameters are
++       allowed: see man(7), man(1) and
++       http://www.tldp.org/HOWTO/Man-Page/q2.html. -->
++  <!ENTITY dhsection   "SECTION">
++  <!-- TITLE should be something like "User commands" or similar (see
++       http://www.tldp.org/HOWTO/Man-Page/q2.html). -->
++  <!ENTITY dhtitle     "trace-cmd User Manual">
++  <!ENTITY dhucpackage "TRACE-CMD">
++  <!ENTITY dhpackage   "trace-cmd">
++]>
++
++<refentry>
++  <refentryinfo>
++    <title>&dhtitle;</title>
++    <productname>&dhpackage;</productname>
++    <authorgroup>
++      <author>
++       <firstname>&dhfirstname;</firstname>
++        <surname>&dhsurname;</surname>
++        <contrib>Wrote this manpage for the Debian system.</contrib>
++        <address>
++          <email>&dhemail;</email>
++        </address>
++      </author>
++    </authorgroup>
++    <copyright>
++      <year>2007</year>
++      <holder>&dhusername;</holder>
++    </copyright>
++    <legalnotice>
++      <para>This manual page was written for the Debian system
++        (and may be used by others).</para>
++      <para>Permission is granted to copy, distribute and/or modify this
++        document under the terms of the GNU General Public License,
++        Version 2 or (at your option) any later version published by
++        the Free Software Foundation.</para>
++      <para>On Debian systems, the complete text of the GNU General Public
++        License can be found in
++        <filename>/usr/share/common-licenses/GPL</filename>.</para>
++    </legalnotice>
++  </refentryinfo>
++  <refmeta>
++    <refentrytitle>&dhucpackage;</refentrytitle>
++    <manvolnum>&dhsection;</manvolnum>
++  </refmeta>
++  <refnamediv>
++    <refname>&dhpackage;</refname>
++    <refpurpose>program to do something</refpurpose>
++  </refnamediv>
++  <refsynopsisdiv>
++    <cmdsynopsis>
++      <command>&dhpackage;</command>
++      <!-- These are several examples, how syntaxes could look -->
++      <arg choice="plain"><option>-e <replaceable>this</replaceable></option></arg>
++      <arg choice="opt"><option>--example=<parameter>that</parameter></option></arg>
++      <arg choice="opt">
++        <group choice="req">
++          <arg choice="plain"><option>-e</option></arg>
++          <arg choice="plain"><option>--example</option></arg>
++        </group>
++        <replaceable class="option">this</replaceable>
++      </arg>
++      <arg choice="opt">
++        <group choice="req">
++          <arg choice="plain"><option>-e</option></arg>
++          <arg choice="plain"><option>--example</option></arg>
++        </group>
++        <group choice="req">
++          <arg choice="plain"><replaceable>this</replaceable></arg>
++          <arg choice="plain"><replaceable>that</replaceable></arg>
++        </group>
++      </arg>
++    </cmdsynopsis>
++    <cmdsynopsis>
++      <command>&dhpackage;</command>
++      <!-- Normally the help and version options make the programs stop
++           right after outputting the requested information. -->
++      <group choice="opt">
++        <arg choice="plain">
++          <group choice="req">
++            <arg choice="plain"><option>-h</option></arg>
++            <arg choice="plain"><option>--help</option></arg>
++          </group>
++        </arg>
++        <arg choice="plain">
++          <group choice="req">
++            <arg choice="plain"><option>-v</option></arg>
++            <arg choice="plain"><option>--version</option></arg>
++          </group>
++        </arg>
++      </group>
++    </cmdsynopsis>
++  </refsynopsisdiv>
++  <refsect1 id="description">
++    <title>DESCRIPTION</title>
++    <para>This manual page documents briefly the
++      <command>&dhpackage;</command> and <command>bar</command>
++      commands.</para>
++    <para>This manual page was written for the Debian distribution
++      because the original program does not have a manual page.
++      Instead, it has documentation in the GNU <citerefentry>
++        <refentrytitle>info</refentrytitle>
++        <manvolnum>1</manvolnum>
++      </citerefentry> format; see below.</para>
++    <para><command>&dhpackage;</command> is a program that...</para>
++  </refsect1>
++  <refsect1 id="options">
++    <title>OPTIONS</title>
++    <para>The program follows the usual GNU command line syntax,
++      with long options starting with two dashes (`-').  A summary of
++      options is included below.  For a complete description, see the
++      <citerefentry>
++        <refentrytitle>info</refentrytitle>
++        <manvolnum>1</manvolnum>
++      </citerefentry> files.</para>
++    <variablelist>
++      <!-- Use the variablelist.term.separator and the
++           variablelist.term.break.after parameters to
++           control the term elements. -->
++      <varlistentry>
++        <term><option>-e <replaceable>this</replaceable></option></term>
++        <term><option>--example=<replaceable>that</replaceable></option></term>
++        <listitem>
++          <para>Does this and that.</para>
++        </listitem>
++      </varlistentry>
++      <varlistentry>
++        <term><option>-h</option></term>
++        <term><option>--help</option></term>
++        <listitem>
++          <para>Show summary of options.</para>
++        </listitem>
++      </varlistentry>
++      <varlistentry>
++        <term><option>-v</option></term>
++        <term><option>--version</option></term>
++        <listitem>
++          <para>Show version of program.</para>
++        </listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++  <refsect1 id="files">
++    <title>FILES</title>
++    <variablelist>
++      <varlistentry>
++        <term><filename>/etc/foo.conf</filename></term>
++        <listitem>
++          <para>The system-wide configuration file to control the
++            behaviour of <application>&dhpackage;</application>. See
++            <citerefentry>
++              <refentrytitle>foo.conf</refentrytitle>
++              <manvolnum>5</manvolnum>
++            </citerefentry> for further details.</para>
++        </listitem>
++      </varlistentry>
++      <varlistentry>
++        <term><filename>${HOME}/.foo.conf</filename></term>
++        <listitem>
++          <para>The per-user configuration file to control the
++             behaviour of <application>&dhpackage;</application>. See
++             <citerefentry>
++               <refentrytitle>foo.conf</refentrytitle>
++               <manvolnum>5</manvolnum>
++             </citerefentry> for further details.</para>
++        </listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++  <refsect1 id="environment">
++    <title>ENVIONMENT</title>
++    <variablelist>
++      <varlistentry>
++        <term><envar>FOO_CONF</envar></term>
++        <listitem>
++          <para>If used, the defined file is used as configuration
++            file (see also <xref linkend="files"/>).</para>
++        </listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++  <refsect1 id="diagnostics">
++    <title>DIAGNOSTICS</title>
++    <para>The following diagnostics may be issued
++      on <filename class="devicefile">stderr</filename>:</para>
++    <variablelist>
++      <varlistentry>
++        <term><errortext>Bad configuration file. Exiting.</errortext></term>
++        <listitem>
++          <para>The configuration file seems to contain a broken configuration
++            line. Use the <option>--verbose</option> option, to get more info.
++          </para>
++        </listitem>
++      </varlistentry>
++    </variablelist>
++    <para><command>&dhpackage;</command> provides some return codes, that can
++      be used in scripts:</para>
++    <segmentedlist>
++      <segtitle>Code</segtitle>
++      <segtitle>Diagnostic</segtitle>
++      <seglistitem>
++        <seg><errorcode>0</errorcode></seg>
++        <seg>Program exited successfully.</seg>
++      </seglistitem>
++      <seglistitem>
++        <seg><errorcode>1</errorcode></seg>
++        <seg>The configuration file seems to be broken.</seg>
++      </seglistitem>
++    </segmentedlist>
++  </refsect1>
++  <refsect1 id="bugs">
++    <!-- Or use this section to tell about upstream BTS. -->
++    <title>BUGS</title>
++    <para>The program is currently limited to only work
++      with the <package>foobar</package> library.</para>
++    <para>The upstreams <acronym>BTS</acronym> can be found
++      at <ulink url="http://bugzilla.foo.tld"/>.</para>
++  </refsect1>
++  <refsect1 id="see_also">
++    <title>SEE ALSO</title>
++    <!-- In alpabetical order. -->
++    <para><citerefentry>
++        <refentrytitle>bar</refentrytitle>
++        <manvolnum>1</manvolnum>
++      </citerefentry>, <citerefentry>
++        <refentrytitle>baz</refentrytitle>
++        <manvolnum>1</manvolnum>
++      </citerefentry>, <citerefentry>
++        <refentrytitle>foo.conf</refentrytitle>
++        <manvolnum>5</manvolnum>
++      </citerefentry></para>
++    <para>The programs are documented fully by <citetitle>The Rise and
++      Fall of a Fooish Bar</citetitle> available via the <citerefentry>
++        <refentrytitle>info</refentrytitle>
++        <manvolnum>1</manvolnum>
++      </citerefentry> system.</para>
++  </refsect1>
++</refentry>
++
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/manpage.sgml.ex
+@@ -0,0 +1,154 @@
++<!doctype refentry PUBLIC "-//OASIS//DTD DocBook V4.1//EN" [
++
++<!-- Process this file with docbook-to-man to generate an nroff manual
++     page: `docbook-to-man manpage.sgml > manpage.1'.  You may view
++     the manual page with: `docbook-to-man manpage.sgml | nroff -man |
++     less'.  A typical entry in a Makefile or Makefile.am is:
++
++manpage.1: manpage.sgml
++	docbook-to-man $< > $@
++
++
++	The docbook-to-man binary is found in the docbook-to-man package.
++	Please remember that if you create the nroff version in one of the
++	debian/rules file targets (such as build), you will need to include
++	docbook-to-man in your Build-Depends control field.
++
++  -->
++
++  <!-- Fill in your name for FIRSTNAME and SURNAME. -->
++  <!ENTITY dhfirstname "<firstname>FIRSTNAME</firstname>">
++  <!ENTITY dhsurname   "<surname>SURNAME</surname>">
++  <!-- Please adjust the date whenever revising the manpage. -->
++  <!ENTITY dhdate      "<date>April 20, 2012</date>">
++  <!-- SECTION should be 1-8, maybe w/ subsection other parameters are
++       allowed: see man(7), man(1). -->
++  <!ENTITY dhsection   "<manvolnum>SECTION</manvolnum>">
++  <!ENTITY dhemail     "<email>yoshitake.kobayashi@toshiba.co.jp</email>">
++  <!ENTITY dhusername  "KOBAYASHI Yoshitake">
++  <!ENTITY dhucpackage "<refentrytitle>TRACE-CMD</refentrytitle>">
++  <!ENTITY dhpackage   "trace-cmd">
++
++  <!ENTITY debian      "<productname>Debian</productname>">
++  <!ENTITY gnu         "<acronym>GNU</acronym>">
++  <!ENTITY gpl         "&gnu; <acronym>GPL</acronym>">
++]>
++
++<refentry>
++  <refentryinfo>
++    <address>
++      &dhemail;
++    </address>
++    <author>
++      &dhfirstname;
++      &dhsurname;
++    </author>
++    <copyright>
++      <year>2003</year>
++      <holder>&dhusername;</holder>
++    </copyright>
++    &dhdate;
++  </refentryinfo>
++  <refmeta>
++    &dhucpackage;
++
++    &dhsection;
++  </refmeta>
++  <refnamediv>
++    <refname>&dhpackage;</refname>
++
++    <refpurpose>program to do something</refpurpose>
++  </refnamediv>
++  <refsynopsisdiv>
++    <cmdsynopsis>
++      <command>&dhpackage;</command>
++
++      <arg><option>-e <replaceable>this</replaceable></option></arg>
++
++      <arg><option>--example <replaceable>that</replaceable></option></arg>
++    </cmdsynopsis>
++  </refsynopsisdiv>
++  <refsect1>
++    <title>DESCRIPTION</title>
++
++    <para>This manual page documents briefly the
++      <command>&dhpackage;</command> and <command>bar</command>
++      commands.</para>
++
++    <para>This manual page was written for the &debian; distribution
++      because the original program does not have a manual page.
++      Instead, it has documentation in the &gnu;
++      <application>Info</application> format; see below.</para>
++
++    <para><command>&dhpackage;</command> is a program that...</para>
++
++  </refsect1>
++  <refsect1>
++    <title>OPTIONS</title>
++
++    <para>These programs follow the usual &gnu; command line syntax,
++      with long options starting with two dashes (`-').  A summary of
++      options is included below.  For a complete description, see the
++      <application>Info</application> files.</para>
++
++    <variablelist>
++      <varlistentry>
++        <term><option>-h</option>
++          <option>--help</option>
++        </term>
++        <listitem>
++          <para>Show summary of options.</para>
++        </listitem>
++      </varlistentry>
++      <varlistentry>
++        <term><option>-v</option>
++          <option>--version</option>
++        </term>
++        <listitem>
++          <para>Show version of program.</para>
++        </listitem>
++      </varlistentry>
++    </variablelist>
++  </refsect1>
++  <refsect1>
++    <title>SEE ALSO</title>
++
++    <para>bar (1), baz (1).</para>
++
++    <para>The programs are documented fully by <citetitle>The Rise and
++      Fall of a Fooish Bar</citetitle> available via the
++      <application>Info</application> system.</para>
++  </refsect1>
++  <refsect1>
++    <title>AUTHOR</title>
++
++    <para>This manual page was written by &dhusername; &dhemail; for
++      the &debian; system (and may be used by others).  Permission is
++      granted to copy, distribute and/or modify this document under
++      the terms of the &gnu; General Public License, Version 2 any
++      later version published by the Free Software Foundation.
++    </para>
++    <para>
++      On Debian systems, the complete text of the GNU General Public
++      License can be found in /usr/share/common-licenses/GPL.
++    </para>
++
++  </refsect1>
++</refentry>
++
++<!-- Keep this comment at the end of the file
++Local variables:
++mode: sgml
++sgml-omittag:t
++sgml-shorttag:t
++sgml-minimize-attributes:nil
++sgml-always-quote-attributes:t
++sgml-indent-step:2
++sgml-indent-data:t
++sgml-parent-document:nil
++sgml-default-dtd-file:nil
++sgml-exposed-tags:nil
++sgml-local-catalogs:nil
++sgml-local-ecat-files:nil
++End:
++-->
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/trace-cmd-doc.install
+@@ -0,0 +1 @@
++#DOCS#
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/trace-cmd.doc-base.EX
+@@ -0,0 +1,20 @@
++Document: trace-cmd
++Title: Debian trace-cmd Manual
++Author: <insert document author here>
++Abstract: This manual describes what trace-cmd is
++ and how it can be used to
++ manage online manuals on Debian systems.
++Section: unknown
++
++Format: debiandoc-sgml
++Files: /usr/share/doc/trace-cmd/trace-cmd.sgml.gz
++
++Format: postscript
++Files: /usr/share/doc/trace-cmd/trace-cmd.ps.gz
++
++Format: text
++Files: /usr/share/doc/trace-cmd/trace-cmd.text.gz
++
++Format: HTML
++Index: /usr/share/doc/trace-cmd/html/index.html
++Files: /usr/share/doc/trace-cmd/html/*.html
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/changelog
+@@ -0,0 +1,5 @@
++trace-cmd (1.2.0-1) unstable; urgency=low
++
++  * Initial release
++
++ -- KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>  Fri, 20 Apr 2012 18:13:58 +0900
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/prerm.ex
+@@ -0,0 +1,38 @@
++#!/bin/sh
++# prerm script for trace-cmd
++#
++# see: dh_installdeb(1)
++
++set -e
++
++# summary of how this script can be called:
++#        * <prerm> `remove'
++#        * <old-prerm> `upgrade' <new-version>
++#        * <new-prerm> `failed-upgrade' <old-version>
++#        * <conflictor's-prerm> `remove' `in-favour' <package> <new-version>
++#        * <deconfigured's-prerm> `deconfigure' `in-favour'
++#          <package-being-installed> <version> `removing'
++#          <conflicting-package> <version>
++# for details, see http://www.debian.org/doc/debian-policy/ or
++# the debian-policy package
++
++
++case "$1" in
++    remove|upgrade|deconfigure)
++    ;;
++
++    failed-upgrade)
++    ;;
++
++    *)
++        echo "prerm called with unknown argument \`$1'" >&2
++        exit 1
++    ;;
++esac
++
++# dh_installdeb will replace this with shell code automatically
++# generated by other debhelper scripts.
++
++#DEBHELPER#
++
++exit 0
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/docs
+@@ -0,0 +1 @@
++README
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/emacsen-remove.ex
+@@ -0,0 +1,15 @@
++#!/bin/sh -e
++# /usr/lib/emacsen-common/packages/remove/trace-cmd
++
++FLAVOR=$1
++PACKAGE=trace-cmd
++
++if [ ${FLAVOR} != emacs ]; then
++    if test -x /usr/sbin/install-info-altdir; then
++        echo remove/${PACKAGE}: removing Info links for ${FLAVOR}
++        install-info-altdir --quiet --remove --dirname=${FLAVOR} /usr/share/info/trace-cmd.info.gz
++    fi
++
++    echo remove/${PACKAGE}: purging byte-compiled files for ${FLAVOR}
++    rm -rf /usr/share/${FLAVOR}/site-lisp/${PACKAGE}
++fi
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/manpage.1.ex
+@@ -0,0 +1,59 @@
++.\"                                      Hey, EMACS: -*- nroff -*-
++.\" First parameter, NAME, should be all caps
++.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
++.\" other parameters are allowed: see man(7), man(1)
++.TH TRACE-CMD SECTION "April 20, 2012"
++.\" Please adjust this date whenever revising the manpage.
++.\"
++.\" Some roff macros, for reference:
++.\" .nh        disable hyphenation
++.\" .hy        enable hyphenation
++.\" .ad l      left justify
++.\" .ad b      justify to both left and right margins
++.\" .nf        disable filling
++.\" .fi        enable filling
++.\" .br        insert line break
++.\" .sp <n>    insert n+1 empty lines
++.\" for manpage-specific macros, see man(7)
++.SH NAME
++trace-cmd \- program to do something
++.SH SYNOPSIS
++.B trace-cmd
++.RI [ options ] " files" ...
++.br
++.B bar
++.RI [ options ] " files" ...
++.SH DESCRIPTION
++This manual page documents briefly the
++.B trace-cmd
++and
++.B bar
++commands.
++.PP
++.\" TeX users may be more comfortable with the \fB<whatever>\fP and
++.\" \fI<whatever>\fP escape sequences to invode bold face and italics,
++.\" respectively.
++\fBtrace-cmd\fP is a program that...
++.SH OPTIONS
++These programs follow the usual GNU command line syntax, with long
++options starting with two dashes (`-').
++A summary of options is included below.
++For a complete description, see the Info files.
++.TP
++.B \-h, \-\-help
++Show summary of options.
++.TP
++.B \-v, \-\-version
++Show version of program.
++.SH SEE ALSO
++.BR bar (1),
++.BR baz (1).
++.br
++The programs are documented fully by
++.IR "The Rise and Fall of a Fooish Bar" ,
++available via the Info system.
++.SH AUTHOR
++trace-cmd was written by <upstream author>.
++.PP
++This manual page was written by KOBAYASHI Yoshitake <yoshitake.kobayashi@toshiba.co.jp>,
++for the Debian project (and may be used by others).
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/emacsen-install.ex
+@@ -0,0 +1,45 @@
++#! /bin/sh -e
++# /usr/lib/emacsen-common/packages/install/trace-cmd
++
++# Written by Jim Van Zandt <jrv@debian.org>, borrowing heavily
++# from the install scripts for gettext by Santiago Vila
++# <sanvila@ctv.es> and octave by Dirk Eddelbuettel <edd@debian.org>.
++
++FLAVOR=$1
++PACKAGE=trace-cmd
++
++if [ ${FLAVOR} = emacs ]; then exit 0; fi
++
++echo install/${PACKAGE}: Handling install for emacsen flavor ${FLAVOR}
++
++#FLAVORTEST=`echo $FLAVOR | cut -c-6`
++#if [ ${FLAVORTEST} = xemacs ] ; then
++#    SITEFLAG="-no-site-file"
++#else
++#    SITEFLAG="--no-site-file"
++#fi
++FLAGS="${SITEFLAG} -q -batch -l path.el -f batch-byte-compile"
++
++ELDIR=/usr/share/emacs/site-lisp/${PACKAGE}
++ELCDIR=/usr/share/${FLAVOR}/site-lisp/${PACKAGE}
++
++# Install-info-altdir does not actually exist.
++# Maybe somebody will write it.
++if test -x /usr/sbin/install-info-altdir; then
++    echo install/${PACKAGE}: install Info links for ${FLAVOR}
++    install-info-altdir --quiet --section "" "" --dirname=${FLAVOR} /usr/share/info/${PACKAGE}.info.gz
++fi
++
++install -m 755 -d ${ELCDIR}
++cd ${ELDIR}
++FILES=`echo *.el`
++cp ${FILES} ${ELCDIR}
++cd ${ELCDIR}
++
++cat << EOF > path.el
++(setq load-path (cons "." load-path) byte-compile-warnings nil)
++EOF
++${FLAVOR} ${FLAGS} ${FILES}
++rm -f *.el path.el
++
++exit 0
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/README.source
+@@ -0,0 +1,9 @@
++trace-cmd for Debian
++--------------------
++
++<this file describes information about the source package, see Debian policy
++manual section 4.14. You WILL either need to modify or delete this file>
++
++
++
++
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/watch.ex
+@@ -0,0 +1,23 @@
++# Example watch control file for uscan
++# Rename this file to "watch" and then you can run the "uscan" command
++# to check for upstream updates and more.
++# See uscan(1) for format
++
++# Compulsory line, this is a version 3 file
++version=3
++
++# Uncomment to examine a Webpage
++# <Webpage URL> <string match>
++#http://www.example.com/downloads.php trace-cmd-(.*)\.tar\.gz
++
++# Uncomment to examine a Webserver directory
++#http://www.example.com/pub/trace-cmd-(.*)\.tar\.gz
++
++# Uncommment to examine a FTP server
++#ftp://ftp.example.com/pub/trace-cmd-(.*)\.tar\.gz debian uupdate
++
++# Uncomment to find new files on sourceforge, for devscripts >= 2.9
++# http://sf.net/trace-cmd/trace-cmd-(.*)\.tar\.gz
++
++# Uncomment to find new files on GooglePages
++# http://example.googlepages.com/foo.html trace-cmd-(.*)\.tar\.gz
+--- /dev/null
++++ trace-cmd-1.2.0/debian-old/source/format
+@@ -0,0 +1 @@
++3.0 (quilt)

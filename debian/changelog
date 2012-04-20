@@ -1,0 +1,5 @@
+trace-cmd (1.2.0-1skerlet1) ashitaka; urgency=low
+
+  * Initial release.
+
+ -- Skerlet Project Team <skerlet@swc.toshiba.co.jp>  Fri, 20 Apr 2012 16:32:38 +0900
