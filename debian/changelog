@@ -1,3 +1,9 @@
+trace-cmd (1.2.0-1skerlet2) ashitaka; urgency=low
+
+  * Fix build-dep
+
+ -- Skerlet Project Team <skerlet@swc.toshiba.co.jp>  Mon, 23 Apr 2012 16:47:59 +0900
+
 trace-cmd (1.2.0-1skerlet1) ashitaka; urgency=low
 
   * Initial release.
