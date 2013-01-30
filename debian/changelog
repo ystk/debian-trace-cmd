@@ -1,3 +1,9 @@
+trace-cmd (1.2.0-1skerlet3) ashitaka; urgency=low
+
+  * Delete debian/patches
+
+ -- Skerlet Project Team <skerlet@swc.toshiba.co.jp>  Wed, 30 Jan 2013 16:32:20 +0900
+
 trace-cmd (1.2.0-1skerlet2) ashitaka; urgency=low
 
   * Fix build-dep
