@@ -1,0 +1,25 @@
+From 9b663633da599b70af329cacaf44fd935ffb9667 Mon Sep 17 00:00:00 2001
+From: Seth Forshee <seth.forshee@canonical.com>
+Date: Fri, 20 Jun 2014 11:05:28 -0500
+Subject: [PATCH 2/2] trace-cmd: Use "python2.7" for executable name
+
+Workaround for lintian python-script-but-no-python-dep error.
+
+Signed-off-by: Seth Forshee <seth.forshee@canonical.com>
+---
+ event-viewer.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/event-viewer.py b/event-viewer.py
+index 651761a..9670ff5 100755
+--- a/event-viewer.py
++++ b/event-viewer.py
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env python2
++#!/usr/bin/env python2.7
+ 
+ import getopt
+ from gobject import *
+-- 
+1.9.1
+

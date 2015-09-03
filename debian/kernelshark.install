@@ -1,0 +1,5 @@
+usr/bin/kernelshark
+usr/bin/trace-graph
+usr/bin/trace-view
+usr/share/man/man1/kernelshark.1
+usr/share/kernelshark

@@ -1,0 +1,78 @@
+trace-cmd (2.4.0-1) unstable; urgency=medium
+
+  * Update to upstream 2.4 release
+  * debian/patches/0001-trace-cmd-Add-missing-mode-to-open-call.patch:
+    Fix error caused by missing mode argument to open(2) with O_CREAT
+  * debian/patches/0002-trace-cmd-Use-python2.7-for-executable-name.patch:
+    Workaround for lintian python-script-but-no-python-dep error
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Thu, 19 Jun 2014 15:34:11 -0500
+
+trace-cmd (2.3.2-1) unstable; urgency=medium
+
+  * Update to upstream 2.3.2 release
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Mon, 10 Mar 2014 06:40:43 -0500
+
+trace-cmd (2.3.1-1) unstable; urgency=medium
+
+  * Update to upstream 2.3.1 release
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Tue, 28 Jan 2014 09:35:24 +0000
+
+trace-cmd (2.3.0-1) unstable; urgency=low
+
+  * Update to 2.3.0 release
+  * Remove all patches as they have been incorported into the new
+    upstream release
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Mon, 06 Jan 2014 14:58:48 -0600
+
+trace-cmd (2.2.1-2) unstable; urgency=low
+
+  * debian/patches/0001-trace-cmd-Make-_GNU_SOURCE-always-defined.patch:
+    Use this upstream fix instead of
+    debian/patches/0001-trace-cmd-listen-Remove-use-of-sighandler_t.patch
+  * debian/patches/0006-Makefile-Ensure-_GNU_SOURCE-really-is-always-defined.patch:
+    Ensure _GNU_SOURCE is set in the case of CFLAGS being provided via a
+    command argument
+  * Change architecture to linux-any as this package won't work with
+    any other kernels.
+  * Bump Standards-Version to 3.9.5
+  * debian/patches/0007-Makefile-Use-CPPFLAGS-from-the-environment.patch:
+    Use CPPFLAGS from the environment
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Fri, 13 Dec 2013 20:08:28 -0600
+
+trace-cmd (2.2.1-1) unstable; urgency=low
+
+  * Update to 2.2.1 upstream release
+  * debian/patches/0001-trace-cmd-listen-Remove-use-of-sighandler_t.patch:
+    Fix build error due to sigaction_t being undefined
+  * 0002-build-Install-data-files-without-execute-permissions.patch: Fix
+    lintian executable-not-elf-or-script warnings
+  * debian/patches/0003-Add-missing-libgen.h-includes.patch: Fix segfaults
+    caused by missing libgen.h includes
+  * debian/patches/0004-Documentation-Add-kernelshark.1.txt.patch: Add man
+    page for kernelshark
+  * Update kernelshark.install to include kernelshark docs 
+  * debian/patches/0005-Makefile-Use-CFLAGS-and-LDFLAGS-when-building-python.patch:
+    Fix lintian hardening-no-relro warnings 
+  * Bump standards version to 3.9.4
+  * Add myself and Kamal Mostafa as uploaders
+  * First Debian release (Closes: #691502)
+
+ -- Seth Forshee <seth.forshee@canonical.com>  Wed, 23 Oct 2013 11:11:32 -0500
+
+trace-cmd (1.0.3-0ubuntu2) precise; urgency=low
+
+  * No-change rebuild to drop spurious libsfgcc1 dependency on armhf.
+
+ -- Adam Conrad <adconrad@0c3.net>  Fri, 02 Dec 2011 21:28:42 -0700
+
+trace-cmd (1.0.3-0ubuntu1) maverick; urgency=low
+
+  * Initial release.
+    - LP: #593343
+
+ -- Chase Douglas <chase.douglas@canonical.com>  Thu, 10 Jun 2010 14:59:05 -0400
