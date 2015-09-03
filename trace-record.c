@@ -61,15 +61,11 @@
 
 #define UDP_MAX_PACKET (65536 - 20)
 
-static int tracing_on_init_val;
-
 static int rt_prio;
 
 static int use_tcp;
 
 static unsigned int page_size;
-
-static int buffer_size;
 
 static const char *output_file = "trace.dat";
 
@@ -83,6 +79,7 @@ static int buffers;
 static char *host;
 static int *client_ports;
 static int sfd;
+static struct tracecmd_output *network_handle;
 
 /* Max size to let a per cpu file get */
 static int max_kb;
@@ -94,18 +91,14 @@ static int filter_pid = -1;
 
 static int finished;
 
+/* setting of /proc/sys/kernel/ftrace_enabled */
+static int fset;
+
 static unsigned recorder_flags;
 
 /* Try a few times to get an accurate date */
 static int date2ts_tries = 5;
 
-struct func_list {
-	struct func_list *next;
-	const char *func;
-};
-
-static struct func_list *filter_funcs;
-static struct func_list *notrace_funcs;
 static struct func_list *graph_funcs;
 
 static int func_stack;
@@ -131,9 +124,11 @@ static char *common_pid_filter;
 struct event_list {
 	struct event_list *next;
 	const char *event;
+	char *trigger;
 	char *filter;
 	char *pid_filter;
 	char *filter_file;
+	char *trigger_file;
 	char *enable_file;
 	int neg;
 };
@@ -147,41 +142,101 @@ struct events {
 	char *name;
 };
 
-struct buffer_instance {
-	struct buffer_instance	*next;
-	const char		*name;
-	const char		*cpumask;
-	struct event_list	*events;
-	struct event_list	**event_next;
-
-	struct event_list	*sched_switch_event;
-	struct event_list	*sched_wakeup_event;
-	struct event_list	*sched_wakeup_new_event;
-
-	int			tracing_on_fd;
-	int			keep;
-};
-
-static struct buffer_instance top_instance;
-static struct buffer_instance *instances;
-
-#define for_each_instance(i) for (i = instances; i; i = (i)->next)
+struct buffer_instance top_instance = { .keep = 1 };
+struct buffer_instance *buffer_instances;
+struct buffer_instance *first_instance = &top_instance;
 
 static struct tracecmd_recorder *recorder;
 
 static int ignore_event_not_found = 0;
+
+static inline int is_top_instance(struct buffer_instance *instance)
+{
+	return instance == &top_instance;
+}
+
+static inline int no_top_instance(void)
+{
+	return first_instance != &top_instance;
+}
 
 static void init_instance(struct buffer_instance *instance)
 {
 	instance->event_next = &instance->events;
 }
 
-static void add_instance(struct buffer_instance *instance)
+/**
+ * add_instance - add a buffer instance to the internal list
+ * @instance: The buffer instance to add
+ */
+void add_instance(struct buffer_instance *instance)
 {
 	init_instance(instance);
-	instance->next = instances;
-	instances = instance;
+	instance->next = buffer_instances;
+	buffer_instances = instance;
 	buffers++;
+}
+
+/**
+ * create_instance - allocate a new buffer instance
+ * @name: The name of the instance (instance will point to this)
+ *
+ * Returns a newly allocated instance. Note that @name will not be
+ * copied, and the instance buffer will point to the string itself.
+ */
+struct buffer_instance *create_instance(char *name)
+{
+	struct buffer_instance *instance;
+
+	instance = malloc_or_die(sizeof(*instance));
+	memset(instance, 0, sizeof(*instance));
+	instance->name = optarg;
+
+	return instance;
+}
+
+/**
+ * tracecmd_stat_cpu - show the buffer stats of a particular CPU
+ * @s: the trace_seq to record the data in.
+ * @cpu: the CPU to stat
+ *
+ */
+void tracecmd_stat_cpu_instance(struct buffer_instance *instance,
+				struct trace_seq *s, int cpu)
+{
+	char buf[BUFSIZ];
+	char *path;
+	char *file;
+	int fd;
+	int r;
+
+	file = malloc(40);
+	if (!file)
+		return;
+	snprintf(file, 40, "per_cpu/cpu%d/stats", cpu);
+
+	path = get_instance_file(instance, file);
+	free(file);
+	fd = open(path, O_RDONLY);
+	tracecmd_put_tracing_file(path);
+	if (fd < 0)
+		return;
+
+	while ((r = read(fd, buf, BUFSIZ)) > 0)
+		trace_seq_printf(s, "%.*s", r, buf);
+
+	close(fd);
+}
+
+/**
+ * tracecmd_stat_cpu - show the buffer stats of a particular CPU
+ * @s: the trace_seq to record the data in.
+ * @cpu: the CPU to stat
+ *
+ */
+void tracecmd_stat_cpu(struct trace_seq *s, int cpu)
+{
+	tracecmd_stat_cpu_instance(&top_instance, s, cpu);
 }
 
 static void add_event(struct buffer_instance *instance, struct event_list *event)
@@ -253,13 +308,12 @@ static int kill_thread_instance(int start, struct buffer_instance *instance)
 static void kill_threads(void)
 {
 	struct buffer_instance *instance;
-	int i;
+	int i = 0;
 
 	if (!recorder_threads || !pids)
 		return;
 
-	i = kill_thread_instance(0, &top_instance);
-	for_each_instance(instance)
+	for_all_instances(instance)
 		i = kill_thread_instance(i, instance);
 }
 
@@ -306,11 +360,18 @@ static int delete_thread_instance(int start, struct buffer_instance *instance)
 static void delete_thread_data(void)
 {
 	struct buffer_instance *instance;
-	int i;
+	int i = 0;
 
-	i = delete_thread_instance(0, &top_instance);
-	for_each_instance(instance)
+	for_all_instances(instance)
 		i = delete_thread_instance(i, instance);
+	/*
+	 * Top instance temp files are still created even if it
+	 * isn't used.
+	 */
+	if (no_top_instance()) {
+		for (i = 0; i < cpu_count; i++)
+			delete_temp_file(&top_instance, i);
+	}
 }
 
 static void stop_threads(void)
@@ -400,7 +461,16 @@ static int set_ftrace(int set, int use_proc)
 	return 0;
 }
 
-static char *
+/**
+ * get_instance_file - return the path to a instance file.
+ * @instance: buffer instance for the file
+ * @file: name of file to return
+ *
+ * Returns the path name of the @file for the given @instance.
+ *
+ * Must use tracecmd_put_tracing_file() to free the returned string.
+ */
+char *
 get_instance_file(struct buffer_instance *instance, const char *file)
 {
 	char *buf;
@@ -415,6 +485,26 @@ get_instance_file(struct buffer_instance *instance, const char *file)
 		free(buf);
 	} else
 		path = tracecmd_get_tracing_file(file);
+
+	return path;
+}
+
+static char *
+get_instance_dir(struct buffer_instance *instance)
+{
+	char *buf;
+	char *path;
+
+	/* only works for instances */
+	if (!instance->name)
+		return NULL;
+
+	buf = malloc_or_die(strlen(instance->name) +
+			    strlen("instances/") + 1);
+	sprintf(buf, "instances/%s", instance->name);
+
+	path = tracecmd_get_tracing_file(buf);
+	free(buf);
 
 	return path;
 }
@@ -438,9 +528,7 @@ static void clear_trace(void)
 {
 	struct buffer_instance *instance;
 
-	__clear_trace(&top_instance);
-
-	for_each_instance(instance)
+	for_all_instances(instance)
 		__clear_trace(instance);
 }
 
@@ -603,9 +691,8 @@ static void update_task_filter(void)
 	common_pid_filter = make_pid_filter(NULL, "common_pid");
 
 	update_ftrace_pids(1);
-	update_pid_event_filters(&top_instance);
-	for_each_instance(instance)
-		update_pid_event_filters(&top_instance);
+	for_all_instances(instance)
+		update_pid_event_filters(instance);
 }
 
 #ifndef NO_PTRACE
@@ -671,10 +758,7 @@ static void add_new_filter_pid(int pid)
 
 	common_pid_filter = append_pid_filter(common_pid_filter, "common_pid", pid);
 
-	update_sched_events(&top_instance, pid);
-	update_event_filters(&top_instance);
-
-	for_each_instance(instance) {
+	for_all_instances(instance) {
 		update_sched_events(instance, pid);
 		update_event_filters(instance);
 	}
@@ -797,13 +881,14 @@ void run_cmd(int argc, char **argv)
 		waitpid(pid, &status, 0);
 }
 
-static void set_plugin(const char *name)
+static void
+set_plugin_instance(struct buffer_instance *instance, const char *name)
 {
 	FILE *fp;
 	char *path;
 	char zero = '0';
 
-	path = tracecmd_get_tracing_file("current_tracer");
+	path = get_instance_file(instance, "current_tracer");
 	fp = fopen(path, "w");
 	if (!fp)
 		die("writing to '%s'", path);
@@ -816,13 +901,27 @@ static void set_plugin(const char *name)
 		return;
 
 	/* Make sure func_stack_trace option is disabled */
-	path = tracecmd_get_tracing_file("options/func_stack_trace");
+	/* First try instance file, then top level */
+	path = get_instance_file(instance, "options/func_stack_trace");
 	fp = fopen(path, "w");
 	tracecmd_put_tracing_file(path);
-	if (!fp)
-		return;
+	if (!fp) {
+		path = tracecmd_get_tracing_file("options/func_stack_trace");
+		fp = fopen(path, "w");
+		tracecmd_put_tracing_file(path);
+		if (!fp)
+			return;
+	}
 	fwrite(&zero, 1, 1, fp);
 	fclose(fp);
+}
+
+static void set_plugin(const char *name)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance)
+		set_plugin_instance(instance, name);
 }
 
 static void save_option(const char *option)
@@ -918,7 +1017,8 @@ static void old_update_events(const char *name, char update)
 	return;
 }
 
-static void reset_events(void)
+static void
+reset_events_instance(struct buffer_instance *instance)
 {
 	glob_t globbuf;
 	char *path;
@@ -928,12 +1028,15 @@ static void reset_events(void)
 	int ret;
 
 	if (use_old_event_method()) {
+		/* old way only had top instance */
+		if (!is_top_instance(instance))
+			return;
 		old_update_events("all", '0');
 		return;
 	}
 
 	c = '0';
-	path = tracecmd_get_tracing_file("events/enable");
+	path = get_instance_file(instance, "events/enable");
 	fd = open(path, O_WRONLY);
 	if (fd < 0)
 		die("opening to '%s'", path);
@@ -941,7 +1044,7 @@ static void reset_events(void)
 	close(fd);
 	tracecmd_put_tracing_file(path);
 
-	path = tracecmd_get_tracing_file("events/*/filter");
+	path = get_instance_file(instance, "events/*/filter");
 	globbuf.gl_offs = 0;
 	ret = glob(path, 0, NULL, &globbuf);
 	tracecmd_put_tracing_file(path);
@@ -959,7 +1062,15 @@ static void reset_events(void)
 	globfree(&globbuf);
 }
 
-static void write_filter(const char *file, const char *filter)
+static void reset_events(void)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance)
+		reset_events_instance(instance);
+}
+
+static void write_file(const char *file, const char *str, const char *type)
 {
 	char buf[BUFSIZ];
 	int fd;
@@ -968,19 +1079,29 @@ static void write_filter(const char *file, const char *filter)
 	fd = open(file, O_WRONLY);
 	if (fd < 0)
 		die("opening to '%s'", file);
-	ret = write(fd, filter, strlen(filter));
+	ret = write(fd, str, strlen(str));
 	close(fd);
 	if (ret < 0) {
-		/* filter failed */
+		/* write failed */
 		fd = open(file, O_RDONLY);
 		if (fd < 0)
 			die("writing to '%s'", file);
 		/* the filter has the error */
 		while ((ret = read(fd, buf, BUFSIZ)) > 0)
 			fprintf(stderr, "%.*s", ret, buf);
-		die("Failed filter of %s\n", file);
+		die("Failed %s of %s\n", type, file);
 		close(fd);
 	}
+}
+
+static void write_filter(const char *file, const char *filter)
+{
+	write_file(file, filter, "filter");
+}
+
+static void write_trigger(const char *file, const char *trigger)
+{
+	write_file(file, trigger, "trigger");
 }
 
 static void
@@ -1001,6 +1122,13 @@ update_event(struct event_list *event, const char *filter,
 
 	if (filter && event->filter_file)
 		write_filter(event->filter_file, filter);
+
+	if (event->trigger_file) {
+		write_trigger(event->trigger_file, event->trigger);
+		/* Make sure we don't write this again */
+		free(event->trigger_file);
+		event->trigger = NULL;
+	}
 
 	if (filter_only || !event->enable_file)
 		return;
@@ -1049,8 +1177,12 @@ static int open_tracing_on(struct buffer_instance *instance)
 
 	path = get_instance_file(instance, "tracing_on");
 	fd = open(path, O_RDWR | O_CLOEXEC);
-	if (fd < 0)
-		die("opening '%s'", path);
+	if (fd < 0) {
+		/* instances may not be created yet */
+		if (is_top_instance(instance))
+			die("opening '%s'", path);
+		return fd;
+	}
 	tracecmd_put_tracing_file(path);
 	instance->tracing_on_fd = fd;
 
@@ -1083,7 +1215,7 @@ static int read_tracing_on(struct buffer_instance *instance)
 
 	fd = open_tracing_on(instance);
 	if (fd < 0)
-		return 0;
+		return fd;
 
 	ret = read(fd, buf, 10);
 	if (ret <= 0)
@@ -1100,8 +1232,7 @@ static void enable_tracing(void)
 
 	check_tracing_enabled();
 
-	write_tracing_on(&top_instance, 1);
-	for_each_instance(instance)
+	for_all_instances(instance)
 		write_tracing_on(instance, 1);
 
 	if (latency)
@@ -1112,8 +1243,7 @@ static void disable_tracing(void)
 {
 	struct buffer_instance *instance;
 
-	write_tracing_on(&top_instance, 0);
-	for_each_instance(instance)
+	for_all_instances(instance)
 		write_tracing_on(instance, 0);
 }
 
@@ -1319,6 +1449,15 @@ create_event(struct buffer_instance *instance, char *path, struct event_list *ol
 	else
 		free(p);
 
+	if (event->trigger) {
+		p = malloc_or_die(strlen(path) + strlen("/trigger") + 1);
+		sprintf(p, "%s/trigger", path);
+		ret = stat(p, &st);
+		if (ret > 0)
+			die("trigger specified but not supported by this kernel");
+		event->trigger_file = p;
+	}
+
 	return event;
 }
 
@@ -1487,8 +1626,7 @@ static void expand_event_list(void)
 	if (use_old_event_method())
 		return;
 
-	expand_event_instance(&top_instance);
-	for_each_instance(instance)
+	for_all_instances(instance)
 		expand_event_instance(instance);
 }
 
@@ -1597,17 +1735,12 @@ static struct tracecmd_recorder *
 create_recorder_instance(struct buffer_instance *instance, const char *file, int cpu)
 {
 	struct tracecmd_recorder *record;
-	const char *name = instance->name;
-	char *tmp;
 	char *path;
 
-	if (!name)
+	if (!instance->name)
 		return tracecmd_create_recorder_maxkb(file, cpu, recorder_flags, max_kb);
 
-	tmp = malloc_or_die(strlen(name) + strlen("instances/") + 1);
-	sprintf(tmp, "instances/%s", name);
-	path = tracecmd_get_tracing_file(tmp);
-	free(tmp);
+	path = get_instance_dir(instance);
 
 	record = tracecmd_create_buffer_recorder_maxkb(file, cpu, recorder_flags,
 						       path, max_kb);
@@ -1744,7 +1877,6 @@ static void communicate_with_listener(int fd)
 
 static void setup_network(void)
 {
-	struct tracecmd_output *handle;
 	struct addrinfo hints;
 	struct addrinfo *result, *rp;
 	int sfd, s;
@@ -1793,7 +1925,7 @@ static void setup_network(void)
 	communicate_with_listener(sfd);
 
 	/* Now create the handle through this socket */
-	handle = tracecmd_create_init_fd_glob(sfd, listed_events);
+	network_handle = tracecmd_create_init_fd_glob(sfd, listed_events);
 
 	/* OK, we are all set, let'r rip! */
 }
@@ -1807,7 +1939,7 @@ static void finish_network(void)
 static void start_threads(void)
 {
 	struct buffer_instance *instance;
-	int i;
+	int i = 0;
 
 	if (host)
 		setup_network();
@@ -1817,10 +1949,7 @@ static void start_threads(void)
 
 	memset(pids, 0, sizeof(*pids) * cpu_count * (buffers + 1));
 
-	for (i = 0; i < cpu_count; i++) {
-		pids[i] = create_recorder(&top_instance, i, 0);
-	}
-	for_each_instance(instance) {
+	for_all_instances(instance) {
 		int x;
 		for (x = 0; x < cpu_count; x++)
 			pids[i++] = create_recorder(instance, x, 0);
@@ -1844,7 +1973,35 @@ static void append_buffer(struct tracecmd_output *handle,
 		put_temp_file(temp_files[i]);
 }
 
-static void record_data(char *date2ts, struct trace_seq *s)
+static void
+add_buffer_stat(struct tracecmd_output *handle, struct buffer_instance *instance)
+{
+	struct trace_seq s;
+	int i;
+
+	trace_seq_init(&s);
+	trace_seq_printf(&s, "\nBuffer: %s\n\n", instance->name);
+	tracecmd_add_option(handle, TRACECMD_OPTION_CPUSTAT,
+			    s.len+1, s.buffer);
+	trace_seq_destroy(&s);
+
+	for (i = 0; i < cpu_count; i++)
+		tracecmd_add_option(handle, TRACECMD_OPTION_CPUSTAT,
+				    instance->s[i].len+1,
+				    instance->s[i].buffer);
+}
+
+static void touch_file(const char *file)
+{
+	int fd;
+
+	fd = open(file, O_WRONLY | O_CREAT | O_TRUNC);
+	if (fd < 0)
+		die("could not create file %s\n", file);
+	close(fd);
+}
+
+static void record_data(char *date2ts)
 {
 	struct tracecmd_option **buffer_options;
 	struct tracecmd_output *handle;
@@ -1868,6 +2025,15 @@ static void record_data(char *date2ts, struct trace_seq *s)
 		for (i = 0; i < cpu_count; i++)
 			temp_files[i] = get_temp_file(&top_instance, i);
 
+		/*
+		 * If top_instance was not used, we still need to create
+		 * empty trace.dat files for it.
+		 */
+		if (no_top_instance()) {
+			for (i = 0; i < cpu_count; i++)
+				touch_file(temp_files[i]);
+		}
+
 		handle = tracecmd_create_init_file_glob(output_file, listed_events);
 		if (!handle)
 			die("Error creating output file");
@@ -1876,9 +2042,14 @@ static void record_data(char *date2ts, struct trace_seq *s)
 			tracecmd_add_option(handle, TRACECMD_OPTION_DATE,
 					    strlen(date2ts)+1, date2ts);
 
-		for (i = 0; i < cpu_count; i++)
-			tracecmd_add_option(handle, TRACECMD_OPTION_CPUSTAT,
-					    s[i].len+1, s[i].buffer);
+		/* Only record the top instance under TRACECMD_OPTION_CPUSTAT*/
+		if (!no_top_instance()) {
+			struct trace_seq *s = top_instance.s;
+
+			for (i = 0; i < cpu_count; i++)
+				tracecmd_add_option(handle, TRACECMD_OPTION_CPUSTAT,
+						    s[i].len+1, s[i].buffer);
+		}
 
 		tracecmd_add_option(handle, TRACECMD_OPTION_TRACECLOCK,
 				    0, NULL);
@@ -1888,6 +2059,7 @@ static void record_data(char *date2ts, struct trace_seq *s)
 			i = 0;
 			for_each_instance(instance) {
 				buffer_options[i++] = tracecmd_add_buffer_option(handle, instance->name);
+				add_buffer_stat(handle, instance);
 			}
 		}
 
@@ -1910,14 +2082,15 @@ static void record_data(char *date2ts, struct trace_seq *s)
 	tracecmd_output_close(handle);
 }
 
-static void write_func_file(const char *file, struct func_list **list)
+static void write_func_file(struct buffer_instance *instance,
+			    const char *file, struct func_list **list)
 {
 	struct func_list *item;
 	char *path;
 	int fd;
 	int ret;
 
-	path = tracecmd_get_tracing_file(file);
+	path = get_instance_file(instance, file);
 
 	fd = open(path, O_WRONLY | O_TRUNC);
 	if (fd < 0)
@@ -1946,17 +2119,23 @@ static void write_func_file(const char *file, struct func_list **list)
 	    item->func, file, item->func);
 }
 
-static int functions_filtered(void)
+static int functions_filtered(struct buffer_instance *instance)
 {
 	char buf[1] = { '#' };
 	char *path;
 	int fd;
 
-	path = tracecmd_get_tracing_file("set_ftrace_filter");
+	path = get_instance_file(instance, "set_ftrace_filter");
 	fd = open(path, O_RDONLY);
 	tracecmd_put_tracing_file(path);
-	if (fd < 0)
+	if (fd < 0) {
+		if (is_top_instance(instance))
+			warning("Can not set set_ftrace_filter");
+		else
+			warning("Can not set set_ftrace_filter for %s",
+				instance->name);
 		return 0;
+	}
 
 	/*
 	 * If functions are not filtered, than the first character
@@ -1970,18 +2149,18 @@ static int functions_filtered(void)
 	return 1;
 }
 
-static void set_funcs(void)
+static void set_funcs(struct buffer_instance *instance)
 {
-	write_func_file("set_ftrace_filter", &filter_funcs);
-	write_func_file("set_ftrace_notrace", &notrace_funcs);
-	write_func_file("set_graph_function", &graph_funcs);
+	write_func_file(instance, "set_ftrace_filter", &instance->filter_funcs);
+	write_func_file(instance, "set_ftrace_notrace", &instance->notrace_funcs);
+	/* graph tracing currently only works for top instance */
+	if (is_top_instance(instance))
+		write_func_file(instance, "set_graph_function", &graph_funcs);
 
 	/* make sure we are filtering functions */
-	if (func_stack) {
-		if (!functions_filtered()) {
-			disable_all(1);
+	if (func_stack && is_top_instance(instance)) {
+		if (!functions_filtered(instance))
 			die("Function stack trace set, but functions not filtered");
-		}
 		save_option(FUNC_STACK_TRACE);
 	}
 }
@@ -2229,8 +2408,9 @@ static char *get_date_to_ts(void)
 	return date2ts;
 }
 
-void set_buffer_size(void)
+static void set_buffer_size_instance(struct buffer_instance *instance)
 {
+	int buffer_size = instance->buffer_size;
 	char buf[BUFSIZ];
 	char *path;
 	int ret;
@@ -2244,16 +2424,27 @@ void set_buffer_size(void)
 
 	snprintf(buf, BUFSIZ, "%d", buffer_size);
 
-	path = tracecmd_get_tracing_file("buffer_size_kb");
+	path = get_instance_file(instance, "buffer_size_kb");
 	fd = open(path, O_WRONLY);
-	if (fd < 0)
-		die("can't open %s", path);
+	if (fd < 0) {
+		warning("can't open %s", path);
+		goto out;
+	}
 
 	ret = write(fd, buf, strlen(buf));
 	if (ret < 0)
 		warning("Can't write to %s", path);
-	tracecmd_put_tracing_file(path);
 	close(fd);
+ out:
+	tracecmd_put_tracing_file(path);
+}
+
+void set_buffer_size(void)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance)
+		set_buffer_size_instance(instance);
 }
 
 static void make_instances(void)
@@ -2261,14 +2452,10 @@ static void make_instances(void)
 	struct buffer_instance *instance;
 	struct stat st;
 	char *path;
-	char *buf;
 	int ret;
 
 	for_each_instance(instance) {
-		buf = malloc_or_die(strlen("instances/") + strlen(instance->name) + 1);
-		sprintf(buf, "instances/%s", instance->name);
-		path = tracecmd_get_tracing_file(buf);
-		free(buf);
+		path = get_instance_dir(instance);
 		ret = stat(path, &st);
 		if (ret < 0) {
 			ret = mkdir(path, 0777);
@@ -2284,7 +2471,6 @@ static void make_instances(void)
 static void remove_instances(void)
 {
 	struct buffer_instance *instance;
-	char *buf;
 	char *path;
 	int ret;
 
@@ -2292,10 +2478,11 @@ static void remove_instances(void)
 		/* Only delete what we created */
 		if (instance->keep)
 			continue;
-		buf = malloc_or_die(strlen("instances/") + strlen(instance->name) + 1);
-		sprintf(buf, "instances/%s", instance->name);
-		path = tracecmd_get_tracing_file(buf);
-		free(buf);
+		if (instance->tracing_on_fd > 0) {
+			close(instance->tracing_on_fd);
+			instance->tracing_on_fd = 0;
+		}
+		path = get_instance_dir(instance);
 		ret = rmdir(path);
 		if (ret < 0)
 			die("rmdir %s", path);
@@ -2330,6 +2517,138 @@ static void check_plugin(const char *plugin)
 	free(buf);
 }
 
+static void check_function_plugin(void)
+{
+	const char *plugin;
+
+	/* We only care about the top_instance */
+	if (no_top_instance())
+		return;
+
+	plugin = top_instance.plugin;
+	if (!plugin)
+		return;
+
+	if (plugin && strncmp(plugin, "function", 8) == 0 &&
+	    func_stack && !top_instance.filter_funcs)
+		die("Must supply function filtering with --func-stack\n");
+}
+
+static void check_doing_something(void)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance) {
+		if (instance->plugin || instance->events)
+			return;
+	}
+
+	die("no event or plugin was specified... aborting");
+}
+
+enum trace_type {
+	TRACE_TYPE_RECORD,
+	TRACE_TYPE_START,
+	TRACE_TYPE_EXTRACT,
+};
+
+static void
+update_plugin_instance(struct buffer_instance *instance,
+		       enum trace_type type)
+{
+	const char *plugin = instance->plugin;
+
+	if (!plugin)
+		return;
+
+	check_plugin(plugin);
+
+	/*
+	 * Latency tracers just save the trace and kill
+	 * the threads.
+	 */
+	if (strcmp(plugin, "irqsoff") == 0 ||
+	    strcmp(plugin, "preemptoff") == 0 ||
+	    strcmp(plugin, "preemptirqsoff") == 0 ||
+	    strcmp(plugin, "wakeup") == 0 ||
+	    strcmp(plugin, "wakeup_rt") == 0) {
+		latency = 1;
+		if (host)
+			die("Network tracing not available with latency tracer plugins");
+	} else if (type == TRACE_TYPE_RECORD) {
+		if (latency)
+			die("Can not record latency tracer and non latency trace together");
+	}
+
+	if (fset < 0 && (strcmp(plugin, "function") == 0 ||
+			 strcmp(plugin, "function_graph") == 0))
+		die("function tracing not configured on this kernel");
+
+	if (type != TRACE_TYPE_EXTRACT)
+		set_plugin_instance(instance, plugin);
+}
+
+static void update_plugins(enum trace_type type)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance)
+		update_plugin_instance(instance, type);
+}
+
+static void allocate_seq(void)
+{
+	struct buffer_instance *instance;
+
+	for_all_instances(instance)
+		instance->s = malloc_or_die(sizeof(struct trace_seq) * cpu_count);
+}
+
+static void record_stats(void)
+{
+	struct buffer_instance *instance;
+	struct trace_seq *s;
+	int cpu;
+
+	for_all_instances(instance) {
+		s = instance->s;
+		for (cpu = 0; cpu < cpu_count; cpu++) {
+			trace_seq_init(&s[cpu]);
+			trace_seq_printf(&s[cpu], "CPU: %d\n", cpu);
+			tracecmd_stat_cpu_instance(instance, &s[cpu], cpu);
+		}
+	}
+}
+
+static void print_stats(void)
+{
+	struct buffer_instance *instance;
+	int cpu;
+
+	for_all_instances(instance) {
+		if (!is_top_instance(instance)) {
+			if (instance != first_instance)
+				printf("\n");
+			printf("Buffer: %s\n\n", instance->name);
+		}
+		for (cpu = 0; cpu < cpu_count; cpu++) {
+			trace_seq_do_printf(&instance->s[cpu]);
+			printf("\n");
+		}
+	}
+}
+
+static void destroy_stats(void)
+{
+	struct buffer_instance *instance;
+	int cpu;
+
+	for_all_instances(instance) {
+		for (cpu = 0; cpu < cpu_count; cpu++)
+			trace_seq_destroy(&instance->s[cpu]);
+	}
+}
+
 static void record_all_events(void)
 {
 	struct tracecmd_event_list *list;
@@ -2359,8 +2678,8 @@ void trace_record (int argc, char **argv)
 	struct event_list *event;
 	struct event_list *last_event;
 	struct tracecmd_event_list *list;
-	struct trace_seq *s;
 	struct buffer_instance *instance = &top_instance;
+	enum trace_type type;
 	char *pids;
 	char *pid;
 	char *sav;
@@ -2375,8 +2694,6 @@ void trace_record (int argc, char **argv)
 	int neg_event = 0;
 	int keep = 0;
 	int date = 0;
-	int fset;
-	int cpu;
 
 	int c;
 
@@ -2391,21 +2708,105 @@ void trace_record (int argc, char **argv)
 	else if ((extract = strcmp(argv[1], "extract") == 0))
 		; /* do nothing */
 	else if (strcmp(argv[1], "stop") == 0) {
+		int topt = 0;
+		for (;;) {
+			int c;
+
+			c = getopt(argc-1, argv+1, "tB:");
+			if (c == -1)
+				break;
+			switch (c) {
+			case 'h':
+				usage(argv);
+				break;
+			case 'B':
+				instance = create_instance(optarg);
+				add_instance(instance);
+				/* top instance requires direct access */
+				if (!topt && is_top_instance(first_instance))
+					first_instance = instance;
+				break;
+			case 't':
+				/* Force to use top instance */
+				topt = 1;
+				instance = &top_instance;
+				first_instance = instance;
+				break;
+			default:
+				usage(argv);
+			}
+
+		}
 		disable_tracing();
 		exit(0);
+	} else if (strcmp(argv[1], "restart") == 0) {
+		int topt = 0;
+		for (;;) {
+			int c;
+
+			c = getopt(argc-1, argv+1, "tB:");
+			if (c == -1)
+				break;
+			switch (c) {
+			case 'h':
+				usage(argv);
+				break;
+			case 'B':
+				instance = create_instance(optarg);
+				add_instance(instance);
+				/* top instance requires direct access */
+				if (!topt && is_top_instance(first_instance))
+					first_instance = instance;
+				break;
+			case 't':
+				/* Force to use top instance */
+				topt = 1;
+				instance = &top_instance;
+				first_instance = instance;
+				break;
+			default:
+				usage(argv);
+			}
+
+		}
+		enable_tracing();
+		exit(0);
 	} else if (strcmp(argv[1], "reset") == 0) {
-		while ((c = getopt(argc-1, argv+1, "b:")) >= 0) {
+		int topt = 0;
+
+		while ((c = getopt(argc-1, argv+1, "b:B:td")) >= 0) {
 			switch (c) {
 			case 'b':
-				buffer_size = atoi(optarg);
+				instance->buffer_size = atoi(optarg);
 				/* Min buffer size is 1 */
 				if (strcmp(optarg, "0") == 0)
-					buffer_size = 1;
+					instance->buffer_size = 1;
+				break;
+			case 'B':
+				instance = create_instance(optarg);
+				add_instance(instance);
+				/* -d will remove keep */
+				instance->keep = 1;
+				/* top instance requires direct access */
+				if (!topt && is_top_instance(first_instance))
+					first_instance = instance;
+				break;
+			case 't':
+				/* Force to use top instance */
+				topt = 1;
+				instance = &top_instance;
+				first_instance = instance;
+				break;
+			case 'd':
+				if (is_top_instance(instance))
+					die("Can not delete top level buffer");
+				instance->keep = 0;
 				break;
 			}
 		}
 		disable_all(1);
 		set_buffer_size();
+		remove_instances();
 		exit(0);
 	} else
 		usage(argv);
@@ -2424,7 +2825,7 @@ void trace_record (int argc, char **argv)
 		if (extract)
 			opts = "+haf:Fp:co:O:sr:g:l:n:P:N:tb:ksiT";
 		else
-			opts = "+hae:f:Fp:cdDo:O:s:r:vg:l:n:P:N:tb:B:ksiTm:M:";
+			opts = "+hae:f:Fp:cdDo:O:s:r:vg:l:n:P:N:tb:R:B:ksiTm:M:";
 		c = getopt_long (argc-1, argv+1, opts, long_options, &option_index);
 		if (c == -1)
 			break;
@@ -2476,6 +2877,24 @@ void trace_record (int argc, char **argv)
 			}
 			break;
 
+		case 'R':
+			if (!last_event)
+				die("trigger must come after event");
+			if (last_event->trigger) {
+				last_event->trigger =
+					realloc(last_event->trigger,
+						strlen(last_event->trigger) +
+						strlen("\n") +
+						strlen(optarg) + 1);
+				strcat(last_event->trigger, "\n");
+				strcat(last_event->trigger, optarg);
+			} else {
+				last_event->trigger =
+					malloc_or_die(strlen(optarg) + 1);
+				sprintf(last_event->trigger, "%s", optarg);
+			}
+			break;
+
 		case 'F':
 			filter_task = 1;
 			break;
@@ -2500,19 +2919,20 @@ void trace_record (int argc, char **argv)
 			neg_event = 1;
 			break;
 		case 'l':
-			add_func(&filter_funcs, optarg);
+			add_func(&instance->filter_funcs, optarg);
 			break;
 		case 'n':
-			add_func(&notrace_funcs, optarg);
+			add_func(&instance->notrace_funcs, optarg);
 			break;
 		case 'g':
 			add_func(&graph_funcs, optarg);
 			break;
 		case 'p':
-			if (plugin)
+			if (instance->plugin)
 				die("only one plugin allowed");
 			for (plugin = optarg; isspace(*plugin); plugin++)
 				;
+			instance->plugin = plugin;
 			for (optarg += strlen(optarg) - 1;
 			     optarg > plugin && isspace(*optarg); optarg--)
 				;
@@ -2577,12 +2997,10 @@ void trace_record (int argc, char **argv)
 			use_tcp = 1;
 			break;
 		case 'b':
-			buffer_size = atoi(optarg);
+			instance->buffer_size = atoi(optarg);
 			break;
 		case 'B':
-			instance = malloc_or_die(sizeof(*instance));
-			memset(instance, 0, sizeof(*instance));
-			instance->name = optarg;
+			instance = create_instance(optarg);
 			add_instance(instance);
 			break;
 		case 'k':
@@ -2605,10 +3023,6 @@ void trace_record (int argc, char **argv)
 		}
 	}
 
-	if (plugin && strncmp(plugin, "function", 8) == 0 &&
-	    func_stack && !filter_funcs)
-		die("Must supply function filtering with --func-stack\n");
-
 	if (do_ptrace && !filter_task && (filter_pid < 0))
 		die(" -c can only be used with -F or -P");
 
@@ -2622,13 +3036,30 @@ void trace_record (int argc, char **argv)
 		run_command = 1;
 	}
 
-	if (!events && !plugin && !extract)
-		die("no event or plugin was specified... aborting");
+	/*
+	 * If top_instance doesn't have any plugins or events, then
+	 * remove it from being processed.
+	 */
+	if (!extract && !top_instance.plugin && !top_instance.events) {
+		if (!buffer_instances)
+			die("No instances reference??");
+		first_instance = buffer_instances;
+	}
+
+	if (!extract)
+		check_doing_something();
+	check_function_plugin();
 
 	if (output)
 		output_file = output;
 
-	tracing_on_init_val = read_tracing_on(&top_instance);
+	/* Save the state of tracing_on before starting */
+	for_all_instances(instance) {
+		instance->tracing_on_init_val = read_tracing_on(instance);
+		/* Some instances may not be created yet */
+		if (instance->tracing_on_init_val < 0)
+			instance->tracing_on_init_val = 1;
+	}
 
 	/* Extracting data records all events in the system. */
 	if (extract && !record_all)
@@ -2650,46 +3081,30 @@ void trace_record (int argc, char **argv)
 		if (record && date)
 			date2ts = get_date_to_ts();
 
-		set_funcs();
-
-		set_mask(&top_instance);
-		for_each_instance(instance)
+		for_all_instances(instance) {
+			set_funcs(instance);
 			set_mask(instance);
+		}
 
 		if (events) {
-			enable_events(&top_instance);
-			for_each_instance(instance)
+			for_all_instances(instance)
 				enable_events(instance);
 		}
 		set_buffer_size();
 	}
 
-	if (plugin) {
-
-		check_plugin(plugin);
-		/*
-		 * Latency tracers just save the trace and kill
-		 * the threads.
-		 */
-		if (strcmp(plugin, "irqsoff") == 0 ||
-		    strcmp(plugin, "preemptoff") == 0 ||
-		    strcmp(plugin, "preemptirqsoff") == 0 ||
-		    strcmp(plugin, "wakeup") == 0 ||
-		    strcmp(plugin, "wakeup_rt") == 0) {
-			latency = 1;
-			if (host)
-				die("Network tracing not available with latency tracer plugins");
-		}
-		if (fset < 0 && (strcmp(plugin, "function") == 0 ||
-				 strcmp(plugin, "function_graph") == 0))
-			die("function tracing not configured on this kernel");
-		if (!extract)
-			set_plugin(plugin);
-	}
+	if (record)
+		type = TRACE_TYPE_RECORD;
+	else if (extract)
+		type = TRACE_TYPE_EXTRACT;
+	else
+		type = TRACE_TYPE_START;
+		
+	update_plugins(type);
 
 	set_options();
 
-	s = malloc_or_die(sizeof(*s) * cpu_count);
+	allocate_seq();
 
 	if (record) {
 		signal(SIGINT, finish);
@@ -2726,11 +3141,7 @@ void trace_record (int argc, char **argv)
 			stop_threads();
 	}
 
-	for (cpu = 0; cpu < cpu_count; cpu++) {
-		trace_seq_init(&s[cpu]);
-		trace_seq_printf(&s[cpu], "CPU: %d\n", cpu);
-		tracecmd_stat_cpu(&s[cpu], cpu);
-	}
+	record_stats();
 
 	if (!keep)
 		disable_all(0);
@@ -2738,11 +3149,8 @@ void trace_record (int argc, char **argv)
 	printf("Kernel buffer statistics:\n"
 	       "  Note: \"entries\" are the entries left in the kernel ring buffer and are not\n"
 	       "        recorded in the trace data. They should all be zero.\n\n");
-	for (cpu = 0; cpu < cpu_count; cpu++) {
-		trace_seq_do_printf(&s[cpu]);
-		printf("\n");
-	}
 
+	print_stats();
 
 	/* extract records the date after extraction */
 	if (extract && date) {
@@ -2754,11 +3162,10 @@ void trace_record (int argc, char **argv)
 		date2ts = get_date_to_ts();
 	}
 
-	record_data(date2ts, s);
+	record_data(date2ts);
 	delete_thread_data();
 
-	for (cpu = 0; cpu < cpu_count; cpu++)
-		trace_seq_destroy(&s[cpu]);
+	destroy_stats();
 
 	if (keep)
 		exit(0);
@@ -2768,8 +3175,13 @@ void trace_record (int argc, char **argv)
 	remove_instances();
 
 	/* If tracing_on was enabled before we started, set it on now */
-	if (tracing_on_init_val)
-		write_tracing_on(&top_instance, tracing_on_init_val);
+	for_all_instances(instance) {
+		if (instance->keep)
+			write_tracing_on(instance, instance->tracing_on_init_val);
+	}
+
+	if (host)
+		tracecmd_output_close(network_handle);
 
 	exit(0);
 }

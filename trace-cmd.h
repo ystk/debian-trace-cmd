@@ -39,7 +39,7 @@ extern int tracecmd_disable_plugins;
 
 struct plugin_list;
 struct plugin_list *tracecmd_load_plugins(struct pevent *pevent);
-void tracecmd_unload_plugins(struct plugin_list *list);
+void tracecmd_unload_plugins(struct plugin_list *list, struct pevent *pevent);
 
 char **tracecmd_event_systems(const char *tracing_dir);
 char **tracecmd_system_events(const char *tracing_dir, const char *system);
@@ -116,7 +116,7 @@ const char *tracecmd_buffer_instance_name(struct tracecmd_input *handle, int ind
 struct tracecmd_input *tracecmd_buffer_instance_handle(struct tracecmd_input *handle, int indx);
 int tracecmd_is_buffer_instance(struct tracecmd_input *handle);
 
-void tracecmd_print_events(struct tracecmd_input *handle);
+void tracecmd_print_events(struct tracecmd_input *handle, const char *regex);
 
 int tracecmd_init_data(struct tracecmd_input *handle);
 

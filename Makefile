@@ -1,6 +1,6 @@
 # trace-cmd version
 TC_VERSION = 2
-TC_PATCHLEVEL = 3
+TC_PATCHLEVEL = 4
 TC_EXTRAVERSION = 0
 
 # Kernel Shark version
@@ -216,7 +216,7 @@ export Q VERBOSE
 TRACECMD_VERSION = $(TC_VERSION).$(TC_PATCHLEVEL).$(TC_EXTRAVERSION)
 KERNELSHARK_VERSION = $(KS_VERSION).$(KS_PATCHLEVEL).$(KS_EXTRAVERSION)
 
-INCLUDES = -I. $(CONFIG_INCLUDES)
+INCLUDES = -I. -I $(srctree)/../../include $(CONFIG_INCLUDES)
 
 include $(src)/features.mk
 
@@ -318,18 +318,20 @@ KERNEL_SHARK_OBJS = $(TRACE_VIEW_OBJS) $(TRACE_GRAPH_OBJS) $(TRACE_GUI_OBJS) \
 PEVENT_LIB_OBJS = event-parse.o trace-seq.o parse-filter.o parse-utils.o
 TCMD_LIB_OBJS = $(PEVENT_LIB_OBJS) trace-util.o trace-input.o trace-ftrace.o \
 			trace-output.o trace-recorder.o trace-restore.o trace-usage.o \
-			trace-blk-hack.o kbuffer-parse.o
+			trace-blk-hack.o kbuffer-parse.o event-plugin.o
 
 PLUGIN_OBJS =
+PLUGIN_OBJS += plugin_jbd2.o
 PLUGIN_OBJS += plugin_hrtimer.o
 PLUGIN_OBJS += plugin_kmem.o
-PLUGIN_OBJS += plugin_sched_switch.o
-PLUGIN_OBJS += plugin_mac80211.o
-PLUGIN_OBJS += plugin_jbd2.o
-PLUGIN_OBJS += plugin_function.o
 PLUGIN_OBJS += plugin_kvm.o
-PLUGIN_OBJS += plugin_blk.o
+PLUGIN_OBJS += plugin_mac80211.o
+PLUGIN_OBJS += plugin_sched_switch.o
+PLUGIN_OBJS += plugin_function.o
+PLUGIN_OBJS += plugin_xen.o
+PLUGIN_OBJS += plugin_scsi.o
 PLUGIN_OBJS += plugin_cfg80211.o
+PLUGIN_OBJS += plugin_blk.o
 
 PLUGINS := $(PLUGIN_OBJS:.o=.so)
 
@@ -574,7 +576,7 @@ clean:
 
 PYTHON_INCLUDES = `pkg-config --cflags $(PYTHON_VERS)`
 PYTHON_LDFLAGS = `pkg-config --libs $(PYTHON_VERS)` \
-		$(shell python -c "import distutils.sysconfig; print distutils.sysconfig.get_config_var('LINKFORSHARED')")
+		$(shell python2 -c "import distutils.sysconfig; print distutils.sysconfig.get_config_var('LINKFORSHARED')")
 PYGTK_CFLAGS = `pkg-config --cflags pygtk-2.0`
 
 ctracecmd.so: $(TCMD_LIB_OBJS) ctracecmd.i

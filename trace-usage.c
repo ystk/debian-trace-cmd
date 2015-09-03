@@ -22,6 +22,7 @@ static struct usage_help usage_help[] = {
 		"           [-m max]\n"
 		"          -e run command with event enabled\n"
 		"          -f filter for previous -e event\n"
+		"          -R trigger for previous -e event\n"
 		"          -p run command with plugin enabled\n"
 		"          -F filter only on the given process\n"
 		"          -P trace the given pid like -F for the command\n"
@@ -65,14 +66,25 @@ static struct usage_help usage_help[] = {
 	{
 		"stop",
 		"stop the kernel from recording trace data",
-		" %s stop\n"
+		" %s stop [-B buf [-B buf]..] [-t]\n"
 		"          Stops the tracer from recording more data.\n"
 		"          Used in conjunction with start\n"
+		"          -B stop a given buffer (more than one may be specified)\n "
+		"          -t stop the top level buffer (needed if -B is specified)\n"
+	},
+	{
+		"restart",
+		"restart the kernel trace data recording",
+		" %s restart [-B buf [-B buf]..] [-t]\n"
+		"          Restarts recording after a trace-cmd stop.\n"
+		"          Used in conjunction with stop\n"
+		"          -B restart a given buffer (more than one may be specified)\n "
+		"          -t restart the top level buffer (needed if -B is specified)\n"
 	},
 	{
 		"show",
 		"show the contents of the kernel tracing buffer",
-		" %s show [-p|-s][-c cpu][-B buf]\n"
+		" %s show [-p|-s][-c cpu][-B buf][options]\n"
 		"          Basically, this is a cat of the trace file.\n"
 		"          -p read the trace_pipe file instead\n"
 		"          -s read the snapshot file instance\n"
@@ -80,14 +92,29 @@ static struct usage_help usage_help[] = {
 		"          -c just show the file associated with a given CPU\n"
 		"          -B read from a tracing buffer instance.\n"
 		"          -f display the file path that is being dumped\n"
+		"          The following options shows the corresponding file name\n"
+		"           and then exits.\n"
+		"          --tracing_on\n"
+		"          --current_tracer\n"
+		"          --buffer_size (for buffer_size_kb)\n"
+		"          --buffer_total_size (for buffer_total_size_kb)\n"
+		"          --ftrace_filter (for set_ftrace_filter)\n"
+		"          --ftrace_notrace (for set_ftrace_notrace)\n"
+		"          --ftrace_pid (for set_ftrace_pid)\n"
+		"          --graph_function (for set_graph_function)\n"
+		"          --graph_notrace (for set_graph_notrace)\n"
+		"          --cpumask (for tracing_cpumask)\n"
 	},
 	{
 		"reset",
 		"disable all kernel tracing and clear the trace buffers",
-		" %s reset [-b size]\n"
+		" %s reset [-b size][-B buf][-d][-t]\n"
 		"          Disables the tracer (may reset trace file)\n"
 		"          Used in conjunction with start\n"
 		"          -b change the kernel buffer size (in kilobytes per CPU)\n"
+		"          -B reset the given buffer instance (top instance ignored)\n"
+		"          -d delete the previous specified instance\n"
+		"          -t still reset the top instance if -B option is given\n"
 	},
 	{
 		"report",
@@ -113,6 +140,8 @@ static struct usage_help usage_help[] = {
 		"          -l show latency format (default with latency tracers)\n"
 		"          -O plugin option -O [plugin:]var[=val]\n"
 		"          --check-events return whether all event formats can be parsed\n"
+		"          --stat - show the buffer stats that were reported at the end of the record.\n"
+
 	},
 	{
 		"hist",
@@ -156,13 +185,17 @@ static struct usage_help usage_help[] = {
 	{
 		"list",
 		"list the available events, plugins or options",
-		" %s list [-e][-t][-o][-f [regex]]\n"
+		" %s list [-e [regex]][-t][-o][-f [regex]]\n"
 		"          -e list available events\n"
+		"            -F show event format\n"
+		"            -R show event triggers\n"
+		"            -l show event filters\n"
 		"          -t list available tracers\n"
 		"          -o list available options\n"
 		"          -f [regex] list available functions to filter on\n"
 		"          -P list loaded plugin files (by path)\n"
 		"          -O list plugin options\n"
+		"          -B list defined buffer instances\n"
 	},
 	{
 		"restore",

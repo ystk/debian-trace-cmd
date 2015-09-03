@@ -424,6 +424,16 @@ static int kvm_mmu_get_page_handler(struct trace_seq *s, struct pevent_record *r
 	return kvm_mmu_print_role(s, record, event, context);
 }
 
+#define PT_WRITABLE_SHIFT 1
+#define PT_WRITABLE_MASK (1ULL << PT_WRITABLE_SHIFT)
+
+static unsigned long long
+process_is_writable_pte(struct trace_seq *s, unsigned long long *args)
+{
+	unsigned long pte = args[0];
+	return pte & PT_WRITABLE_MASK;
+}
+
 int PEVENT_PLUGIN_LOADER(struct pevent *pevent)
 {
 	init_disassembler();
@@ -456,5 +466,46 @@ int PEVENT_PLUGIN_LOADER(struct pevent *pevent)
 			"kvm_mmu_prepare_zap_page", kvm_mmu_print_role,
 			NULL);
 
+	pevent_register_print_function(pevent,
+				       process_is_writable_pte,
+				       PEVENT_FUNC_ARG_INT,
+				       "is_writable_pte",
+				       PEVENT_FUNC_ARG_LONG,
+				       PEVENT_FUNC_ARG_VOID);
 	return 0;
+}
+
+void PEVENT_PLUGIN_UNLOADER(struct pevent *pevent)
+{
+	pevent_unregister_event_handler(pevent, -1, "kvm", "kvm_exit",
+					kvm_exit_handler, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvm", "kvm_emulate_insn",
+					kvm_emulate_insn_handler, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvm", "kvm_nested_vmexit",
+					kvm_nested_vmexit_handler, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvm", "kvm_nested_vmexit_inject",
+					kvm_nested_vmexit_inject_handler, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvmmmu", "kvm_mmu_get_page",
+					kvm_mmu_get_page_handler, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvmmmu", "kvm_mmu_sync_page",
+					kvm_mmu_print_role, NULL);
+
+	pevent_unregister_event_handler(pevent, -1,
+					"kvmmmu", "kvm_mmu_unsync_page",
+					kvm_mmu_print_role, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvmmmu", "kvm_mmu_zap_page",
+					kvm_mmu_print_role, NULL);
+
+	pevent_unregister_event_handler(pevent, -1, "kvmmmu",
+			"kvm_mmu_prepare_zap_page", kvm_mmu_print_role,
+			NULL);
+
+	pevent_unregister_print_function(pevent, process_is_writable_pte,
+					 "is_writable_pte");
 }

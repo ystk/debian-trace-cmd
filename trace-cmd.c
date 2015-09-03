@@ -19,7 +19,9 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <getopt.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <errno.h>
 
 #include "trace-local.h"
@@ -70,18 +72,15 @@ void *malloc_or_die(unsigned int size)
 	return data;
 }
 
-void show_file(const char *name)
+static void dump_file_content(const char *path)
 {
 	char buf[BUFSIZ];
-	char *path;
-	FILE *fp;
 	ssize_t n;
+	FILE *fp;
 
-	path = tracecmd_get_tracing_file(name);
 	fp = fopen(path, "r");
 	if (!fp)
 		die("reading %s", path);
-	tracecmd_put_tracing_file(path);
 
 	do {
 		n = fread(buf, 1, BUFSIZ, fp);
@@ -91,7 +90,19 @@ void show_file(const char *name)
 	fclose(fp);
 }
 
-static void show_file_re(const char *name, const char *re)
+void show_file(const char *name)
+{
+	char *path;
+
+	path = tracecmd_get_tracing_file(name);
+	dump_file_content(path);
+	tracecmd_put_tracing_file(path);
+}
+
+typedef int (*process_file_func)(char *buf, int len);
+
+static void process_file_re(process_file_func func,
+			    const char *name, const char *re)
 {
 	regex_t reg;
 	char *path;
@@ -127,7 +138,7 @@ static void show_file_re(const char *name, const char *re)
 	do {
 		n = getline(&buf, &l, fp);
 		if (n > 0 && regexec(&reg, buf, 0, NULL, 0) == 0)
-			fwrite(buf, 1, n, stdout);
+			func(buf, n);
 	} while (n > 0);
 	free(buf);
 	fclose(fp);
@@ -135,9 +146,157 @@ static void show_file_re(const char *name, const char *re)
 	regfree(&reg);
 }
 
-static void show_events(void)
+static int show_file_write(char *buf, int len)
 {
-	show_file("available_events");
+	return fwrite(buf, 1, len, stdout);
+}
+
+static void show_file_re(const char *name, const char *re)
+{
+	process_file_re(show_file_write, name, re);
+}
+
+static char *get_event_file(const char *type, char *buf, int len)
+{
+	char *system;
+	char *event;
+	char *path;
+	char *file;
+
+	if (buf[len-1] == '\n')
+		buf[len-1] = '\0';
+
+	system = strtok(buf, ":");
+	if (!system)
+		die("no system found in %s", buf);
+
+	event = strtok(NULL, ":");
+	if (!event)
+		die("no event found in %s\n", buf);
+
+	path = tracecmd_get_tracing_file("events");
+	file = malloc_or_die(strlen(path) + strlen(system) + strlen(event) +
+			     strlen(type) + strlen("///") + 1);
+	sprintf(file, "%s/%s/%s/%s", path, system, event, type);
+	tracecmd_put_tracing_file(path);
+
+	return file;
+}
+
+static int event_filter_write(char *buf, int len)
+{
+	char *file;
+
+	if (buf[len-1] == '\n')
+		buf[len-1] = '\0';
+
+	printf("%s\n", buf);
+
+	file = get_event_file("filter", buf, len);
+	dump_file_content(file);
+	free(file);
+	printf("\n");
+
+	return 0;
+}
+
+static int event_trigger_write(char *buf, int len)
+{
+	char *file;
+
+	if (buf[len-1] == '\n')
+		buf[len-1] = '\0';
+
+	printf("%s\n", buf);
+
+	file = get_event_file("trigger", buf, len);
+	dump_file_content(file);
+	free(file);
+	printf("\n");
+
+	return 0;
+}
+
+static int event_format_write(char *fbuf, int len)
+{
+	char *file = get_event_file("format", fbuf, len);
+	char *buf = NULL;
+	size_t l;
+	FILE *fp;
+	int n;
+
+	/* The get_event_file() crops system in fbuf */
+	printf("system: %s\n", fbuf);
+
+	/* Don't print the print fmt, it's ugly */
+
+	fp = fopen(file, "r");
+	if (!fp)
+		die("reading %s", file);
+
+	do {
+		n = getline(&buf, &l, fp);
+		if (n > 0) {
+			if (strncmp(buf, "print fmt", 9) == 0)
+				break;
+			fwrite(buf, 1, n, stdout);
+		}
+	} while (n > 0);
+	fclose(fp);
+	free(buf);
+	free(file);
+
+	return 0;
+}
+
+static void show_event_filter_re(const char *re)
+{
+	process_file_re(event_filter_write, "available_events", re);
+}
+
+static void show_event_trigger_re(const char *re)
+{
+	process_file_re(event_trigger_write, "available_events", re);
+}
+
+static void show_event_format_re(const char *re)
+{
+	process_file_re(event_format_write, "available_events", re);
+}
+
+void show_instance_file(struct buffer_instance *instance, const char *name)
+{
+	char *path;
+
+	path = get_instance_file(instance, name);
+	dump_file_content(path);
+	tracecmd_put_tracing_file(path);
+}
+
+enum {
+	SHOW_EVENT_FORMAT		= 1 << 0,
+	SHOW_EVENT_FILTER		= 1 << 1,
+	SHOW_EVENT_TRIGGER		= 1 << 2,
+};
+
+static void show_events(const char *eventre, int flags)
+{
+	if (flags && !eventre)
+		die("When specifying event files, an event must be named");
+
+	if (eventre) {
+		if (flags & SHOW_EVENT_FORMAT)
+			show_event_format_re(eventre);
+
+		else if (flags & SHOW_EVENT_FILTER)
+			show_event_filter_re(eventre);
+
+		else if (flags & SHOW_EVENT_TRIGGER)
+			show_event_trigger_re(eventre);
+		else
+			show_file_re("available_events", eventre);
+	} else
+		show_file("available_events");
 }
 
 static void show_tracers(void)
@@ -158,6 +317,35 @@ static void show_functions(const char *funcre)
 		show_file("available_filter_functions");
 }
 
+static void show_buffers(void)
+{
+	struct dirent *dent;
+	DIR *dir;
+	char *path;
+	int printed = 0;
+
+	path = tracecmd_get_tracing_file("instances");
+	dir = opendir(path);
+	tracecmd_put_tracing_file(path);
+	if (!dir)
+		die("Can not read instance directory");
+
+	while ((dent = readdir(dir))) {
+		const char *name = dent->d_name;
+
+		if (strcmp(name, ".") == 0 ||
+		    strcmp(name, "..") == 0)
+			continue;
+
+		printf("%s\n", name);
+		printed = 1;
+	}
+	closedir(dir);
+
+	if (!printed)
+		printf("No buffer instances defined\n");
+}
+
 static void show_plugins(void)
 {
 	struct pevent *pevent;
@@ -173,7 +361,7 @@ static void show_plugins(void)
 	list = tracecmd_load_plugins(pevent);
 	trace_util_print_plugins(&s, "  ", "\n", list);
 	trace_seq_do_printf(&s);
-	tracecmd_unload_plugins(list);
+	tracecmd_unload_plugins(list, pevent);
 	pevent_free(pevent);
 }
 
@@ -194,9 +382,22 @@ static void show_plugin_options(void)
 	list = tracecmd_load_plugins(pevent);
 	trace_util_print_plugin_options(&s);
 	trace_seq_do_printf(&s);
-	tracecmd_unload_plugins(list);
+	tracecmd_unload_plugins(list, pevent);
 	pevent_free(pevent);
 }
+
+enum {
+	OPT_tracing_on			= 255,
+	OPT_current_tracer		= 254,
+	OPT_buffer_size_kb		= 253,
+	OPT_buffer_total_size_kb	= 252,
+	OPT_ftrace_filter		= 251,
+	OPT_ftrace_notrace		= 250,
+	OPT_ftrace_pid			= 249,
+	OPT_graph_function		= 248,
+	OPT_graph_notrace		= 247,
+	OPT_cpumask			= 246,
+};
 
 int main (int argc, char **argv)
 {
@@ -266,7 +467,7 @@ int main (int argc, char **argv)
 		ret = tracecmd_fill_local_events(tracing, pevent);
 		if (ret || pevent->parsing_failures)
 			ret = EINVAL;
-		tracecmd_unload_plugins(list);
+		tracecmd_unload_plugins(list, pevent);
 		pevent_free(pevent);
 		exit(ret);
 
@@ -274,6 +475,7 @@ int main (int argc, char **argv)
 		   strcmp(argv[1], "start") == 0 ||
 		   strcmp(argv[1], "extract") == 0 ||
 		   strcmp(argv[1], "stop") == 0 ||
+		   strcmp(argv[1], "restart") == 0 ||
 		   strcmp(argv[1], "reset") == 0) {
 		trace_record(argc, argv);
 		exit(0);
@@ -285,13 +487,31 @@ int main (int argc, char **argv)
 		const char *buffer = NULL;
 		const char *file = "trace";
 		const char *cpu = NULL;
+		struct buffer_instance *instance = &top_instance;
 		char cpu_path[128];
 		char *path;
 		int snap = 0;
 		int pipe = 0;
 		int show_name = 0;
+		int option_index = 0;
+		int stop = 0;
+		static struct option long_options[] = {
+			{"tracing_on", no_argument, NULL, OPT_tracing_on},
+			{"current_tracer", no_argument, NULL, OPT_current_tracer},
+			{"buffer_size", no_argument, NULL, OPT_buffer_size_kb},
+			{"buffer_total_size", no_argument, NULL, OPT_buffer_total_size_kb},
+			{"ftrace_filter", no_argument, NULL, OPT_ftrace_filter},
+			{"ftrace_notrace", no_argument, NULL, OPT_ftrace_notrace},
+			{"ftrace_pid", no_argument, NULL, OPT_ftrace_pid},
+			{"graph_function", no_argument, NULL, OPT_graph_function},
+			{"graph_notrace", no_argument, NULL, OPT_graph_notrace},
+			{"cpumask", no_argument, NULL, OPT_cpumask},
+			{"help", no_argument, NULL, '?'},
+			{NULL, 0, NULL, 0}
+		};
 
-		while ((c = getopt(argc-1, argv+1, "B:c:fsp")) >= 0) {
+		while ((c = getopt_long(argc-1, argv+1, "B:c:fsp",
+					long_options, &option_index)) >= 0) {
 			switch (c) {
 			case 'h':
 				usage(argv);
@@ -300,6 +520,7 @@ int main (int argc, char **argv)
 				if (buffer)
 					die("Can only show one buffer at a time");
 				buffer = optarg;
+				instance = create_instance(optarg);
 				break;
 			case 'c':
 				if (cpu)
@@ -319,10 +540,52 @@ int main (int argc, char **argv)
 				if (snap)
 					die("Can not have -s and -p together");
 				break;
+			case OPT_tracing_on:
+				show_instance_file(instance, "tracing_on");
+				stop = 1;
+				break;
+			case OPT_current_tracer:
+				show_instance_file(instance, "current_tracer");
+				stop = 1;
+				break;
+			case OPT_buffer_size_kb:
+				show_instance_file(instance, "buffer_size_kb");
+				stop = 1;
+				break;
+			case OPT_buffer_total_size_kb:
+				show_instance_file(instance, "buffer_total_size_kb");
+				stop = 1;
+				break;
+			case OPT_ftrace_filter:
+				show_instance_file(instance, "set_ftrace_filter");
+				stop = 1;
+				break;
+			case OPT_ftrace_notrace:
+				show_instance_file(instance, "set_ftrace_notrace");
+				stop = 1;
+				break;
+			case OPT_ftrace_pid:
+				show_instance_file(instance, "set_ftrace_pid");
+				stop = 1;
+				break;
+			case OPT_graph_function:
+				show_instance_file(instance, "set_graph_function");
+				stop = 1;
+				break;
+			case OPT_graph_notrace:
+				show_instance_file(instance, "set_graph_notrace");
+				stop = 1;
+				break;
+			case OPT_cpumask:
+				show_instance_file(instance, "tracing_cpumask");
+				stop = 1;
+				break;
 			default:
 				usage(argv);
 			}
 		}
+		if (stop)
+			exit(0);
 		if (pipe)
 			file = "trace_pipe";
 		else if (snap)
@@ -356,55 +619,77 @@ int main (int argc, char **argv)
 		int tracer = 0;
 		int options = 0;
 		int funcs = 0;
+		int buffers = 0;
 		int plug = 0;
 		int plug_op = 0;
+		int flags = 0;
+		int show_all = 1;
+		int i;
+		const char *arg;
 		const char *funcre = NULL;
+		const char *eventre = NULL;
 
-		while ((c = getopt(argc-1, argv+1, ":heptPOof:")) >= 0) {
- next:
-			switch (c) {
-			case 'h':
-				usage(argv);
-				break;
-			case 'e':
-				events = 1;
-				break;
-			case 'p':
-			case 't':
-				tracer = 1;
-				break;
-			case 'P':
-				plug = 1;
-				break;
-			case 'O':
-				plug_op = 1;
-				break;
-			case 'o':
-				options = 1;
-				break;
-			case 'f':
-				funcs = 1;
-				if (optarg[0] == '-') {
-					c = optarg[1];
-					goto next;
+		for (i = 2; i < argc; i++) {
+			arg = NULL;
+			if (argv[i][0] == '-') {
+				if (i < argc - 1) {
+					if (argv[i+1][0] != '-')
+						arg = argv[i+1];
 				}
-				funcre = optarg;
-				break;
-			default:
-				/* -f can have an optional parameter */
-				if (strcmp(argv[optind], "-f") == 0) {
-					funcs = 1;
+				switch (argv[i][1]) {
+				case 'h':
+					usage(argv);
 					break;
+				case 'e':
+					events = 1;
+					eventre = arg;
+					show_all = 0;
+					break;
+				case 'B':
+					buffers = 1;
+					show_all = 0;
+					break;
+				case 'F':
+					flags |= SHOW_EVENT_FORMAT;
+					break;
+				case 'R':
+					flags |= SHOW_EVENT_TRIGGER;
+					break;
+				case 'l':
+					flags |= SHOW_EVENT_FILTER;
+					break;
+				case 'p':
+				case 't':
+					tracer = 1;
+					show_all = 0;
+					break;
+				case 'P':
+					plug = 1;
+					show_all = 0;
+					break;
+				case 'O':
+					plug_op = 1;
+					show_all = 0;
+					break;
+				case 'o':
+					options = 1;
+					show_all = 0;
+					break;
+				case 'f':
+					funcs = 1;
+					funcre = arg;
+					show_all = 0;
+					break;
+				default:
+					fprintf(stderr, "list: invalid option -- '%c'\n",
+						argv[optind][1]);
+					usage(argv);
 				}
-				fprintf(stderr, "list: invalid option -- '%c'\n",
-					argv[optind][1]);
-				
-				usage(argv);
 			}
 		}
 
 		if (events)
-			show_events();
+			show_events(eventre, flags);
 
 		if (tracer)
 			show_tracers();
@@ -421,9 +706,12 @@ int main (int argc, char **argv)
 		if (funcs)
 			show_functions(funcre);
 
-		if (!events && !tracer && !options && !plug && !plug_op && !funcs) {
+		if (buffers)
+			show_buffers();
+
+		if (show_all) {
 			printf("events:\n");
-			show_events();
+			show_events(NULL, 0);
 			printf("\ntracers:\n");
 			show_tracers();
 			printf("\noptions:\n");

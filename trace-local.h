@@ -57,4 +57,48 @@ void trace_snapshot(int argc, char **argv);
 
 void trace_mem(int argc, char **argv);
 
+/* --- instance manipulation --- */
+
+struct func_list {
+	struct func_list *next;
+	const char *func;
+};
+
+struct buffer_instance {
+	struct buffer_instance	*next;
+	const char		*name;
+	const char		*cpumask;
+	struct event_list	*events;
+	struct event_list	**event_next;
+
+	struct event_list	*sched_switch_event;
+	struct event_list	*sched_wakeup_event;
+	struct event_list	*sched_wakeup_new_event;
+
+	const char		*plugin;
+	struct func_list	*filter_funcs;
+	struct func_list	*notrace_funcs;
+
+	struct trace_seq	*s;
+
+	int			tracing_on_init_val;
+	int			tracing_on_fd;
+	int			keep;
+	int			buffer_size;
+};
+
+extern struct buffer_instance top_instance;
+extern struct buffer_instance *buffer_instances;
+extern struct buffer_instance *first_instance;
+
+#define for_each_instance(i) for (i = buffer_instances; i; i = (i)->next)
+#define for_all_instances(i) for (i = first_instance; i; \
+				  i = i == &top_instance ? buffer_instances : (i)->next)
+
+struct buffer_instance *create_instance(char *name);
+void add_instance(struct buffer_instance *instance);
+char *get_instance_file(struct buffer_instance *instance, const char *file);
+
+void show_instance_file(struct buffer_instance *instance, const char *name);
+
 #endif /* __TRACE_LOCAL_H */
